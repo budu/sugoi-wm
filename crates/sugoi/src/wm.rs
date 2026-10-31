@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver};
 use log::{debug, info};
 use rustix::event::{PollFd, PollFlags, poll};
 use x11rb::connection::Connection;
-use x11rb::errors::ReplyError;
+use x11rb::errors::{ConnectionError, ReplyError};
 use x11rb::properties::WmHints;
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::{ErrorKind, Event};
@@ -126,7 +126,9 @@ impl Wm {
             }
             if let Some(command) = self.next_command() {
                 if command == Command::Quit {
-                    self.conn.flush()?;
+                    self.release_all()?;
+                    // A round trip, so the server applies the restores before sugoi exits.
+                    self.conn.sync().map_err(lost)?;
                     info!("quit");
                     return Ok(());
                 }
@@ -199,10 +201,11 @@ impl Wm {
             Event::DestroyNotify(e) if self.clients.contains_key(&e.window) => {
                 self.unmanage(e.window, true)?
             }
-            // [F2]
+            // [F2] Refocusing the focused window would take the focus from its subwindows.
             Event::EnterNotify(e) => {
                 if e.mode == NotifyMode::NORMAL
                     && e.detail != NotifyDetail::INFERIOR
+                    && self.focused != Some(e.event)
                     && self.clients.contains_key(&e.event)
                 {
                     self.focus(e.event, false)?;
@@ -262,8 +265,10 @@ impl Wm {
             | EventMask::FOCUS_CHANGE
             | EventMask::PROPERTY_CHANGE
             | EventMask::STRUCTURE_NOTIFY;
-        let selection = ChangeWindowAttributesAux::new().event_mask(mask);
-        self.conn.change_window_attributes(window, &selection)?;
+        let attributes = ChangeWindowAttributesAux::new()
+            .event_mask(mask)
+            .border_pixel(self.config.normal_color);
+        self.conn.change_window_attributes(window, &attributes)?;
         let geometry = self.conn.get_geometry(window)?;
         let Some(hints) = self.read_hints(window)? else {
             return Ok(());
@@ -274,8 +279,6 @@ impl Wm {
         debug!("manage {window:#x}");
         let border = ConfigureWindowAux::new().border_width(u32::from(self.config.border_width));
         self.conn.configure_window(window, &border)?;
-        let color = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
-        self.conn.change_window_attributes(window, &color)?;
         for button in CLICKS {
             self.conn.grab_button(
                 false,
@@ -387,11 +390,11 @@ impl Wm {
             let above = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
             self.conn.configure_window(window, &above)?;
         }
-        // Refocusing the focused window would take the focus from its subwindows.
-        if self.focused == Some(window) || !hints.focusable() {
+        if !hints.focusable() {
             return Ok(());
         }
-        if let Some(previous) = self.focused {
+        // A click on the focused window still sets the focus: a client may have moved it.
+        if let Some(previous) = self.focused.filter(|&w| w != window) {
             let normal = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
             self.conn.change_window_attributes(previous, &normal)?;
         }
@@ -406,6 +409,15 @@ impl Wm {
         self.history.retain(|&w| w != window);
         self.history.insert(0, window);
         self.focused = Some(window);
+        Ok(())
+    }
+
+    /// [C2] Gives every managed window its original border back before sugoi exits.
+    fn release_all(&mut self) -> Result<(), Error> {
+        for (&window, client) in &self.clients {
+            let border = ConfigureWindowAux::new().border_width(u32::from(client.border_width));
+            self.conn.configure_window(window, &border)?;
+        }
         Ok(())
     }
 
@@ -438,8 +450,16 @@ impl Wm {
             0,
             64,
         )?;
-        let Some(wm_hints) = vanished(wm_hints.reply())? else {
-            return Ok(None);
+        // A malformed WM_HINTS reads as absent; x11rb reports it as a connection error.
+        let wm_hints = match wm_hints.reply() {
+            Err(ReplyError::ConnectionError(ConnectionError::ParseError(e))) => {
+                debug!("malformed WM_HINTS on {window:#x}: {e:?}");
+                None
+            }
+            reply => match vanished(reply)? {
+                Some(wm_hints) => wm_hints,
+                None => return Ok(None),
+            },
         };
         let Some(protocols) = vanished(protocols.reply())? else {
             return Ok(None);

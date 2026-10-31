@@ -434,3 +434,94 @@ fn f4_globally_active_window_takes_the_focus_after_a_later_focus_change() {
     global.conn.sync().unwrap();
     assert_eq!(session.focus(), global.window);
 }
+
+/// [F7]
+#[test]
+fn f7_malformed_wm_hints_count_as_absent() {
+    let session = Session::new();
+    let app = session.app(AppSpec::at(0, 0, 200, 200));
+    // Flags announce the input and state fields, but the property ends before them.
+    let hints = [3];
+    app.conn
+        .change_property32(
+            PropMode::REPLACE,
+            app.window,
+            AtomEnum::WM_HINTS,
+            AtomEnum::WM_HINTS,
+            &hints,
+        )
+        .unwrap();
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    assert!(session.wm_running());
+}
+
+/// [F3]
+#[test]
+fn f3_click_takes_the_focus_back_from_a_client_that_moved_it() {
+    let session = Session::new();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(400, 0, 300, 200));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.move_pointer(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    b.conn.set_input_focus(InputFocus::POINTER_ROOT, b.window, x11rb::CURRENT_TIME).unwrap();
+    b.conn.sync().unwrap();
+    session.click(50, 50);
+    eventually("a focused again", || session.focus() == a.window);
+}
+
+/// [F3]
+#[test]
+fn f3_the_wheel_does_not_raise() {
+    let session = Session::new();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(200, 0, 300, 200));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.move_pointer(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    session.press(50, 50, 4);
+    settle();
+    assert!(session.above(b.window, a.window));
+}
+
+/// [M4]
+#[test]
+fn m4_client_unmap_releases_the_button_grabs() {
+    let session = Session::new();
+    let app = session.app(AppSpec::at(0, 0, 100, 100));
+    app.map();
+    eventually("managed", || session.wm_state(app.window).is_some());
+    app.conn.unmap_window(app.window).unwrap();
+    app.conn.sync().unwrap();
+    eventually("WM_STATE deleted", || session.wm_state(app.window).is_none());
+    // A passive grab on the same button fails with BadAccess while sugoi still holds one.
+    let grab = app.conn.grab_button(
+        false,
+        app.window,
+        EventMask::BUTTON_PRESS,
+        GrabMode::ASYNC,
+        GrabMode::ASYNC,
+        x11rb::NONE,
+        x11rb::NONE,
+        ButtonIndex::M1,
+        ModMask::ANY,
+    );
+    assert!(grab.unwrap().check().is_ok());
+}
+
+/// [C2]
+#[test]
+fn c2_quit_restores_the_original_border_width() {
+    let mut session = Session::new();
+    let app = session.app(AppSpec::at(0, 0, 200, 200));
+    app.map();
+    eventually("managed", || session.geometry(app.window).unwrap().border_width == 3);
+    assert!(session.send(Command::Quit));
+    assert!(session.join().is_ok());
+    assert_eq!(session.geometry(app.window).unwrap().border_width, 0);
+}

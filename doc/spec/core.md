@@ -55,6 +55,7 @@ border is the client window's own X border, and windows stay usable if sugoi exi
 - **[F5] Focus history.** sugoi keeps the managed windows in focus order. When the
   focused window is unmanaged, the most recently focused remaining window gets the
   focus; with none left, the focus goes to the root (`PointerRoot`).
+- **[F7] Malformed hints.** A `WM_HINTS` property sugoi cannot parse counts as absent.
 - **[F6] Borders.** The focused window's border has the focused color, every other
   managed window's the normal color. Defaults, from the awesome config: width 3 px,
   focused `#aa007b`, normal `#000000`.
@@ -70,4 +71,5 @@ Until the Ruby config (M2) and IPC (M7) exist, commands reach sugoi through its
 library API (`Handle`), which the tests use.
 
 - **[C1] Close focused.** Closes the focused window ([K1]); does nothing without one.
-- **[C2] Quit.** sugoi exits with status 0. Managed windows stay mapped.
+- **[C2] Quit.** sugoi exits with status 0. Managed windows stay mapped and get their
+  original border width back, so a WM started next adopts them as they were.

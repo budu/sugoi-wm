@@ -82,6 +82,7 @@ impl Session {
 
     /// An X server without a WM, for windows that exist before sugoi starts.
     pub fn without_wm() -> Session {
+        let _ = env_logger::builder().is_test(true).try_init();
         let x = Xvfb::start();
         let (conn, screen) = x11rb::connect(Some(&x.display)).unwrap();
         let root = conn.setup().roots[screen].root;
@@ -175,9 +176,14 @@ impl Session {
     }
 
     pub fn click(&self, x: i16, y: i16) {
+        self.press(x, y, 1);
+    }
+
+    /// Presses and releases `button` at (x, y); 4 and 5 are the wheel.
+    pub fn press(&self, x: i16, y: i16, button: u8) {
         self.move_pointer(x, y);
-        self.conn.xtest_fake_input(BUTTON_PRESS_EVENT, 1, 0, self.root, 0, 0, 0).unwrap();
-        self.conn.xtest_fake_input(BUTTON_RELEASE_EVENT, 1, 0, self.root, 0, 0, 0).unwrap();
+        self.conn.xtest_fake_input(BUTTON_PRESS_EVENT, button, 0, self.root, 0, 0, 0).unwrap();
+        self.conn.xtest_fake_input(BUTTON_RELEASE_EVENT, button, 0, self.root, 0, 0, 0).unwrap();
         self.conn.sync().unwrap();
     }
 }
@@ -186,7 +192,9 @@ impl Drop for Session {
     fn drop(&mut self) {
         if let Some((handle, thread)) = self.wm.take() {
             handle.send(Command::Quit);
-            let _ = thread.join();
+            if let Ok(Err(e)) = thread.join() {
+                eprintln!("sugoi ended with an error: {e}");
+            }
         }
     }
 }
