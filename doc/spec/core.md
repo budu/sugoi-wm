@@ -14,7 +14,8 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   window manager is running on <display>".
 - **[S2] Adoption.** At startup, every child of the root that is viewable and not
   override-redirect is managed as if it had just been mapped, except that focus goes
-  to the window under the pointer if there is one.
+  to the window under the pointer if there is one. Adopted windows enter the focus
+  history ([F5]) topmost first.
 - **[S3] Connection loss.** If the X connection closes, sugoi exits with status 1 and
   logs the cause.
 
@@ -31,21 +32,26 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   until layouts exist (M3); the border width stays sugoi's. When nothing changes,
   sugoi sends a synthetic `ConfigureNotify` with the current geometry (ICCCM 4.1.5).
 - **[M4] Unmanage.** A managed window stops being managed when it is destroyed or
-  unmapped by its client; sugoi deletes its `WM_STATE` and, if it had the focus,
-  focuses the next window ([F5]).
+  unmapped by its client. An unmapped window may be reused (a tray icon), so sugoi
+  deletes its `WM_STATE`, releases its button grabs and event selection, and restores
+  its original border width. If it had the focus, the next window gets it ([F5]).
 - **[M5] Vanished windows.** Requests on a window that no longer exists fail with an
   X error; sugoi logs it at debug level and carries on.
 
 ## Focus
 
-- **[F1] New windows take focus.** A newly managed window is focused and raised.
+- **[F1] New windows take focus.** A newly managed window is raised and focused.
 - **[F2] Sloppy focus.** The pointer entering a managed window focuses it. Only
   `EnterNotify` events in normal mode count; grab and ungrab crossings do not.
-- **[F3] Click to focus.** A button press on a managed window focuses and raises it,
-  and the press still reaches the window.
+  Entering the window that already has the focus changes nothing, so a subwindow the
+  client focused keeps it.
+- **[F3] Click to focus.** A press of button 1, 2 or 3 on a managed window raises and
+  focuses it, and the press still reaches the window. The wheel is not intercepted.
 - **[F4] Input model** (ICCCM 4.1.7). Focusing a window sets the X input focus to it
   when its `WM_HINTS` input flag is true or absent, and sends `WM_TAKE_FOCUS` when its
-  `WM_PROTOCOLS` lists it. A window with neither cannot be focused; the focus stays.
+  `WM_PROTOCOLS` lists it. A window with neither cannot be focused; the focus stays,
+  but the window is still raised by [F1] and [F3]. `SetInputFocus` and the protocol
+  messages use `CurrentTime` (decision notes, Core).
 - **[F5] Focus history.** sugoi keeps the managed windows in focus order. When the
   focused window is unmanaged, the most recently focused remaining window gets the
   focus; with none left, the focus goes to the root (`PointerRoot`).

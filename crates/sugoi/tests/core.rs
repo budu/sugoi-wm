@@ -332,3 +332,105 @@ fn c2_quit_exits_cleanly_and_leaves_windows_mapped() {
     assert!(session.join().is_ok());
     assert!(session.viewable(app.window));
 }
+
+/// [S2] and [F5]
+#[test]
+fn s2_adopted_windows_enter_the_history_topmost_first() {
+    let mut session = Session::without_wm();
+    let apps: Vec<App> =
+        [0, 300, 600].into_iter().map(|x| session.app(AppSpec::at(x, 0, 200, 200))).collect();
+    for app in &apps {
+        app.map();
+    }
+    session.move_pointer(350, 50);
+    session.start_wm();
+    eventually("b focused", || session.focus() == apps[1].window);
+    apps[1].conn.destroy_window(apps[1].window).unwrap();
+    apps[1].conn.sync().unwrap();
+    eventually("topmost c focused", || session.focus() == apps[2].window);
+}
+
+/// [M4]
+#[test]
+fn m4_client_unmap_restores_the_border_and_releases_the_window() {
+    let session = Session::new();
+    let app = session.app(AppSpec::at(0, 0, 100, 100));
+    app.map();
+    eventually("managed", || session.wm_state(app.window).is_some());
+    assert_eq!(session.geometry(app.window).unwrap().border_width, 3);
+    app.conn.unmap_window(app.window).unwrap();
+    app.conn.sync().unwrap();
+    eventually("WM_STATE deleted", || session.wm_state(app.window).is_none());
+    eventually("border restored", || session.geometry(app.window).unwrap().border_width == 0);
+    let attributes = session.conn.get_window_attributes(app.window).unwrap().reply().unwrap();
+    assert_eq!(attributes.all_event_masks, EventMask::NO_EVENT);
+}
+
+/// [F1] and [F4]
+#[test]
+fn f1_windows_that_cannot_take_focus_are_still_raised() {
+    let session = Session::new();
+    let inert = session.app(AppSpec { input: Some(false), ..AppSpec::at(100, 100, 300, 200) });
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    inert.map();
+    eventually("inert raised", || session.above(inert.window, a.window));
+    assert_eq!(session.focus(), a.window);
+}
+
+/// [F2]
+#[test]
+fn f2_reentering_the_focused_window_keeps_the_focus_on_its_subwindow() {
+    let session = Session::new();
+    let app = session.app(AppSpec::at(0, 0, 300, 200));
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    let child = app.conn.generate_id().unwrap();
+    let aux = CreateWindowAux::new();
+    app.conn
+        .create_window(0, child, app.window, 10, 10, 50, 50, 0, WindowClass::INPUT_OUTPUT, 0, &aux)
+        .unwrap();
+    app.conn.map_window(child).unwrap();
+    app.conn.set_input_focus(InputFocus::PARENT, child, x11rb::CURRENT_TIME).unwrap();
+    app.conn.sync().unwrap();
+    for (x, y) in [(200, 150), (1000, 700), (200, 150)] {
+        session.move_pointer(x, y);
+    }
+    settle();
+    assert_eq!(session.focus(), child);
+}
+
+/// [F4]
+#[test]
+fn f4_globally_active_window_takes_the_focus_after_a_later_focus_change() {
+    let session = Session::new();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(400, 0, 300, 200));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.move_pointer(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    // The server's last focus change moves past every timestamp sugoi has seen.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    a.conn.set_input_focus(InputFocus::POINTER_ROOT, a.window, x11rb::CURRENT_TIME).unwrap();
+    a.conn.sync().unwrap();
+    let spec = AppSpec {
+        input: Some(false),
+        protocols: vec!["WM_TAKE_FOCUS"],
+        ..AppSpec::at(800, 0, 300, 200)
+    };
+    let global = session.app(spec);
+    global.map();
+    let protocols = global.atom("WM_PROTOCOLS");
+    let message = global.expect_event(
+        "WM_TAKE_FOCUS",
+        |e| matches!(e, Event::ClientMessage(m) if m.type_ == protocols),
+    );
+    let Event::ClientMessage(message) = message else { unreachable!() };
+    let time = message.data.as_data32()[1];
+    global.conn.set_input_focus(InputFocus::POINTER_ROOT, global.window, time).unwrap();
+    global.conn.sync().unwrap();
+    assert_eq!(session.focus(), global.window);
+}

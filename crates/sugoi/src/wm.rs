@@ -32,13 +32,29 @@ x11rb::atom_manager! {
 const POINTER_ROOT: Window = 1;
 /// `NormalState` in `WM_STATE` (ICCCM 4.1.3.1).
 const NORMAL_STATE: u32 = 1;
+/// [F3] Buttons that focus on click; the wheel (4 and 5) is not grabbed.
+const CLICKS: [ButtonIndex; 3] = [ButtonIndex::M1, ButtonIndex::M2, ButtonIndex::M3];
 
-/// What sugoi knows about a managed window.
+/// A managed window.
 struct Client {
-    /// [F4] `WM_HINTS` input flag, true when absent.
+    hints: Hints,
+    /// The border width before sugoi managed the window, restored on withdrawal.
+    border_width: u16,
+}
+
+/// [F4] The ICCCM properties that decide how a window takes focus and closes.
+#[derive(Clone, Copy)]
+struct Hints {
+    /// The `WM_HINTS` input flag, true when absent.
     accepts_input: bool,
     take_focus: bool,
     delete_window: bool,
+}
+
+impl Hints {
+    fn focusable(self) -> bool {
+        self.accepts_input || self.take_focus
+    }
 }
 
 pub struct Wm {
@@ -50,10 +66,6 @@ pub struct Wm {
     /// [F5] Managed windows, most recently focused first.
     history: Vec<Window>,
     focused: Option<Window>,
-    /// The latest server timestamp seen, for protocol messages. `SetInputFocus` uses
-    /// `CurrentTime` instead: a focus set at `CurrentTime` moves the server's
-    /// last-focus-change time past earlier event stamps, and X ignores older requests.
-    time: Timestamp,
     commands: Receiver<Command>,
     wake: UnixStream,
     handle: Handle,
@@ -90,12 +102,12 @@ impl Wm {
             clients: HashMap::new(),
             history: Vec::new(),
             focused: None,
-            time: CURRENT_TIME,
             commands,
             wake,
             handle,
         };
         wm.adopt()?;
+        wm.conn.flush()?;
         info!("managing {} windows", wm.clients.len());
         Ok(wm)
     }
@@ -153,15 +165,22 @@ impl Wm {
     /// [S2]
     fn adopt(&mut self) -> Result<(), Error> {
         let tree = self.conn.query_tree(self.root)?.reply().map_err(lost)?;
-        for window in tree.children {
-            let Some(attributes) = vanished(self.conn.get_window_attributes(window)?.reply())?
-            else {
-                continue;
-            };
-            // manage() leaves override-redirect windows alone.
-            if attributes.map_state == MapState::VIEWABLE {
-                self.manage(window, false)?;
+        let cookies = tree
+            .children
+            .iter()
+            .map(|&window| Ok((window, self.conn.get_window_attributes(window)?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let mut viewable = Vec::new();
+        for (window, cookie) in cookies {
+            if let Some(attributes) = vanished(cookie.reply())?
+                && attributes.map_state == MapState::VIEWABLE
+            {
+                viewable.push((window, attributes));
             }
+        }
+        // Children come bottom to top; the history wants the topmost first.
+        for (window, attributes) in viewable.into_iter().rev() {
+            self.manage_window(window, &attributes, false)?;
         }
         let pointer = self.conn.query_pointer(self.root)?.reply().map_err(lost)?;
         if self.clients.contains_key(&pointer.child) {
@@ -172,7 +191,7 @@ impl Wm {
 
     fn handle_event(&mut self, event: Event) -> Result<(), Error> {
         match event {
-            Event::MapRequest(e) => self.manage(e.window, true)?,
+            Event::MapRequest(e) => self.manage(e.window)?,
             Event::ConfigureRequest(e) => self.configure_request(&e)?,
             Event::UnmapNotify(e) if self.clients.contains_key(&e.window) => {
                 self.unmanage(e.window, false)?
@@ -182,7 +201,6 @@ impl Wm {
             }
             // [F2]
             Event::EnterNotify(e) => {
-                self.time = e.time;
                 if e.mode == NotifyMode::NORMAL
                     && e.detail != NotifyDetail::INFERIOR
                     && self.clients.contains_key(&e.event)
@@ -192,20 +210,19 @@ impl Wm {
             }
             // [F3] The grab is synchronous: replay the press so the window gets it.
             Event::ButtonPress(e) => {
-                self.time = e.time;
                 if self.clients.contains_key(&e.event) {
                     self.focus(e.event, true)?;
                 }
                 self.conn.allow_events(Allow::REPLAY_POINTER, e.time)?;
             }
             Event::PropertyNotify(e) => {
-                self.time = e.time;
                 let hints: Atom = AtomEnum::WM_HINTS.into();
                 if (e.atom == hints || e.atom == self.atoms.WM_PROTOCOLS)
                     && self.clients.contains_key(&e.window)
-                    && let Some(client) = self.read_client(e.window)?
+                    && let Some(hints) = self.read_hints(e.window)?
+                    && let Some(client) = self.clients.get_mut(&e.window)
                 {
-                    self.clients.insert(e.window, client);
+                    client.hints = hints;
                 }
             }
             // [M5]
@@ -215,42 +232,63 @@ impl Wm {
         Ok(())
     }
 
-    /// [M1] and [M2]; `map` is false for windows adopted at startup.
-    fn manage(&mut self, window: Window, map: bool) -> Result<(), Error> {
+    /// [M1] and [M2], for a `MapRequest`.
+    fn manage(&mut self, window: Window) -> Result<(), Error> {
+        if self.clients.contains_key(&window) {
+            self.conn.map_window(window)?;
+            return Ok(());
+        }
         let Some(attributes) = vanished(self.conn.get_window_attributes(window)?.reply())? else {
             return Ok(());
         };
-        if self.clients.contains_key(&window) || attributes.override_redirect {
+        self.manage_window(window, &attributes, true)
+    }
+
+    /// `map` is false for windows adopted at startup.
+    fn manage_window(
+        &mut self,
+        window: Window,
+        attributes: &GetWindowAttributesReply,
+        map: bool,
+    ) -> Result<(), Error> {
+        if attributes.override_redirect {
             if map {
                 self.conn.map_window(window)?;
             }
             return Ok(());
         }
-        let Some(client) = self.read_client(window)? else {
+        // Select property changes before reading the properties, so none is missed.
+        let mask = EventMask::ENTER_WINDOW
+            | EventMask::FOCUS_CHANGE
+            | EventMask::PROPERTY_CHANGE
+            | EventMask::STRUCTURE_NOTIFY;
+        let selection = ChangeWindowAttributesAux::new().event_mask(mask);
+        self.conn.change_window_attributes(window, &selection)?;
+        let geometry = self.conn.get_geometry(window)?;
+        let Some(hints) = self.read_hints(window)? else {
+            return Ok(());
+        };
+        let Some(geometry) = vanished(geometry.reply())? else {
             return Ok(());
         };
         debug!("manage {window:#x}");
         let border = ConfigureWindowAux::new().border_width(u32::from(self.config.border_width));
         self.conn.configure_window(window, &border)?;
-        let mask = EventMask::ENTER_WINDOW
-            | EventMask::FOCUS_CHANGE
-            | EventMask::PROPERTY_CHANGE
-            | EventMask::STRUCTURE_NOTIFY;
-        let attributes = ChangeWindowAttributesAux::new()
-            .border_pixel(self.config.normal_color)
-            .event_mask(mask);
-        self.conn.change_window_attributes(window, &attributes)?;
-        self.conn.grab_button(
-            false,
-            window,
-            EventMask::BUTTON_PRESS,
-            GrabMode::SYNC,
-            GrabMode::ASYNC,
-            NONE,
-            NONE,
-            ButtonIndex::ANY,
-            ModMask::ANY,
-        )?;
+        let color = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
+        self.conn.change_window_attributes(window, &color)?;
+        for button in CLICKS {
+            self.conn.grab_button(
+                false,
+                window,
+                EventMask::BUTTON_PRESS,
+                GrabMode::SYNC,
+                GrabMode::ASYNC,
+                NONE,
+                NONE,
+                button,
+                ModMask::ANY,
+            )?;
+        }
         let state = self.atoms.WM_STATE;
         self.conn.change_property32(
             PropMode::REPLACE,
@@ -259,7 +297,7 @@ impl Wm {
             state,
             &[NORMAL_STATE, NONE],
         )?;
-        self.clients.insert(window, client);
+        self.clients.insert(window, Client { hints, border_width: geometry.border_width });
         self.history.push(window);
         if map {
             self.conn.map_window(window)?;
@@ -272,15 +310,23 @@ impl Wm {
     /// [M4]
     fn unmanage(&mut self, window: Window, destroyed: bool) -> Result<(), Error> {
         debug!("unmanage {window:#x}");
-        self.clients.remove(&window);
+        let Some(client) = self.clients.remove(&window) else {
+            return Ok(());
+        };
         self.history.retain(|&w| w != window);
         if !destroyed {
+            // Withdrawn windows may be reused (a tray icon): leave nothing of sugoi's.
             self.conn.delete_property(window, self.atoms.WM_STATE)?;
+            self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
+            let selection = ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT);
+            self.conn.change_window_attributes(window, &selection)?;
+            let border = ConfigureWindowAux::new().border_width(u32::from(client.border_width));
+            self.conn.configure_window(window, &border)?;
         }
         if self.focused == Some(window) {
             self.focused = None;
             // [F5]
-            let next = self.history.iter().copied().find(|w| self.clients[w].focusable());
+            let next = self.history.iter().copied().find(|w| self.clients[w].hints.focusable());
             match next {
                 Some(next) => self.focus(next, false)?,
                 None => {
@@ -328,30 +374,35 @@ impl Wm {
     }
 
     /// [F4] and [F6]; `raise` for new windows and clicks, not for sloppy focus.
+    ///
+    /// The input focus is set at `CurrentTime`, and protocol messages carry it too: sugoi
+    /// has no fresh server timestamp, and an event's stamp can be older than the server's
+    /// last focus change, which makes X ignore the request.
     fn focus(&mut self, window: Window, raise: bool) -> Result<(), Error> {
         let Some(client) = self.clients.get(&window) else {
             return Ok(());
         };
-        if !client.focusable() {
-            return Ok(());
-        }
-        let (accepts_input, take_focus) = (client.accepts_input, client.take_focus);
-        if let Some(previous) = self.focused.filter(|&w| w != window) {
-            let normal = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
-            self.conn.change_window_attributes(previous, &normal)?;
-        }
-        if accepts_input {
-            self.conn.set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)?;
-        }
-        if take_focus {
-            self.send_protocol(window, self.atoms.WM_TAKE_FOCUS)?;
-        }
-        let focused = ChangeWindowAttributesAux::new().border_pixel(self.config.focused_color);
-        self.conn.change_window_attributes(window, &focused)?;
+        let hints = client.hints;
         if raise {
             let above = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
             self.conn.configure_window(window, &above)?;
         }
+        // Refocusing the focused window would take the focus from its subwindows.
+        if self.focused == Some(window) || !hints.focusable() {
+            return Ok(());
+        }
+        if let Some(previous) = self.focused {
+            let normal = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
+            self.conn.change_window_attributes(previous, &normal)?;
+        }
+        if hints.accepts_input {
+            self.conn.set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)?;
+        }
+        if hints.take_focus {
+            self.send_protocol(window, self.atoms.WM_TAKE_FOCUS)?;
+        }
+        let focused = ChangeWindowAttributesAux::new().border_pixel(self.config.focused_color);
+        self.conn.change_window_attributes(window, &focused)?;
         self.history.retain(|&w| w != window);
         self.history.insert(0, window);
         self.focused = Some(window);
@@ -360,7 +411,7 @@ impl Wm {
 
     /// [K1]
     fn close(&mut self, window: Window) -> Result<(), Error> {
-        let deletes = self.clients.get(&window).is_some_and(|c| c.delete_window);
+        let deletes = self.clients.get(&window).is_some_and(|c| c.hints.delete_window);
         if deletes {
             self.send_protocol(window, self.atoms.WM_DELETE_WINDOW)?;
         } else {
@@ -370,18 +421,16 @@ impl Wm {
     }
 
     fn send_protocol(&self, window: Window, protocol: Atom) -> Result<(), Error> {
-        let data = [protocol, self.time, 0, 0, 0];
+        let data = [protocol, CURRENT_TIME, 0, 0, 0];
         let message = ClientMessageEvent::new(32, window, self.atoms.WM_PROTOCOLS, data);
         self.conn.send_event(false, window, EventMask::NO_EVENT, message)?;
         Ok(())
     }
 
-    /// Reads the window's ICCCM hints; `None` if it no longer exists.
-    fn read_client(&self, window: Window) -> Result<Option<Client>, Error> {
-        let Some(hints) = vanished(WmHints::get(&self.conn, window)?.reply())? else {
-            return Ok(None);
-        };
-        let reply = self.conn.get_property(
+    /// Reads `WM_HINTS` and `WM_PROTOCOLS`; `None` if the window no longer exists.
+    fn read_hints(&self, window: Window) -> Result<Option<Hints>, Error> {
+        let wm_hints = WmHints::get(&self.conn, window)?;
+        let protocols = self.conn.get_property(
             false,
             window,
             self.atoms.WM_PROTOCOLS,
@@ -389,21 +438,18 @@ impl Wm {
             0,
             64,
         )?;
-        let Some(protocols) = vanished(reply.reply())? else {
+        let Some(wm_hints) = vanished(wm_hints.reply())? else {
+            return Ok(None);
+        };
+        let Some(protocols) = vanished(protocols.reply())? else {
             return Ok(None);
         };
         let protocols: Vec<Atom> = protocols.value32().map(|v| v.collect()).unwrap_or_default();
-        Ok(Some(Client {
-            accepts_input: hints.and_then(|h| h.input).unwrap_or(true),
+        Ok(Some(Hints {
+            accepts_input: wm_hints.and_then(|h| h.input).unwrap_or(true),
             take_focus: protocols.contains(&self.atoms.WM_TAKE_FOCUS),
             delete_window: protocols.contains(&self.atoms.WM_DELETE_WINDOW),
         }))
-    }
-}
-
-impl Client {
-    fn focusable(&self) -> bool {
-        self.accepts_input || self.take_focus
     }
 }
 

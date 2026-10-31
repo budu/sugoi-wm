@@ -5,10 +5,14 @@ each section.
 
 ## Core
 
-- **`SetInputFocus` at `CurrentTime`** (M1). With event timestamps, a focus set earlier
-  at `CurrentTime` moved the server's last-focus-change time past later requests' stamps,
-  and X ignored them: f1 and f5 failed 10 times in 30 runs. Protocol messages
-  (`WM_TAKE_FOCUS`, `WM_DELETE_WINDOW`) still carry the latest event timestamp.
+- **`CurrentTime` for focus and protocol messages** (M1). With event timestamps, a
+  focus set earlier at `CurrentTime` moved the server's last-focus-change time past later
+  stamps, and X ignored the requests: f1 and f5 failed 10 times in 30 runs. The review
+  found the same for `WM_TAKE_FOCUS`, which a globally active client echoes into its own
+  `SetInputFocus`. A fresh server timestamp (a zero-length property change and its
+  `PropertyNotify`) would satisfy ICCCM to the letter; dwm also sends `CurrentTime`.
+- **Click grabs on buttons 1 to 3** (M1, review). A synchronous grab on every button sent
+  each wheel tick through sugoi before the window got it; the wheel focuses nothing.
 - **Non-reparenting** (M1). No frames, so the border is the client's X border, no save
   set is needed and windows stay usable if sugoi exits.
 - **A plain `poll` loop** (M1). `rustix::event::poll` over the X socket and a socket
