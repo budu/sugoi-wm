@@ -1,6 +1,6 @@
 # sugoi-wm 0.1 plan
 
-Status: draft, 2026-10-31.
+Status: approved, 2026-10-31.
 
 Version 0.1 replaces awesome as the daily window manager on a single-monitor X11 session:
 a Rust core, a Ruby configuration, apps spawned in their own cgroup scopes, three
@@ -53,8 +53,9 @@ M1 comes first: every later milestone builds on its window model and its X test 
   error.
 - **Tests.** An integration suite drives the WM under Xvfb from `cargo test`, one case
   per behavior, and passes at every milestone close.
-- **Stability.** The user runs sugoi as the session WM for the agreed period (open
-  question) with no panic and no lost window.
+- **Stability.** The user runs sugoi as the session WM for 2 working days with no
+  panic and no lost window. Either one restarts the period after its fix; smaller
+  issues go to the known issues.
 - **Footprint.** RSS and idle CPU are measured at the release as the baseline for 0.2;
   no target in 0.1. awesome's 68.8 MiB includes its widgets, so it is a reference only.
 
@@ -113,8 +114,10 @@ release.
 - **Spawn.** Through `systemd-run --user --scope` as today, so the config ports at once;
   M6 replaces the mechanism.
 - **Reload.** Mod-Ctrl-r evaluates the config into a new set of bindings and swaps it in
-  only on success; errors go to the log and to `notify-send` if a daemon exists.
+  only on success; errors go to the log and to `notify-send` (dunst).
 - **Guard.** A watchdog stops a hook that runs past a time limit (value set by research).
+- **Chords.** No binding depends on focus: Mod-Shift-q kills the window, Mod-Shift-e
+  quits the WM, Mod-Ctrl-Return opens superkitty (the overlaps were mistakes).
 - **Artifact.** `parity.md` starts here: every awesome binding and rule, with its
   status.
 
@@ -122,7 +125,7 @@ release.
 
 - **Tile.** Master and stack, master side configurable (today's default puts it on the
   right), master width factor (Mod-h and Mod-;), per-client height factor, swap with
-  the master, new windows join the stack.
+  the next or previous window, new windows join the stack.
 - **Max and float.** Max fills the work area; float keeps the window's geometry and
   places new windows centered and on screen.
 - **States.** Fullscreen, maximize, minimize and restore, on top, center, and the 70 %
@@ -132,8 +135,11 @@ release.
 
 ### M4 Workspaces
 
+- **Banks.** 30 workspaces in 3 banks of 10: Mod-1 to Mod-9 and Mod-0 (keycodes #10 to
+  #19) name 1 to 10.
 - **Cycling.** Mod-n goes to n; when the current workspace is n mod 10 it goes to the
-  next one in that class, wrapping. Stateless: no timeout.
+  next one in that class (3, 13, 23, 3), wrapping. Stateless: no timeout, and empty
+  workspaces are not skipped.
 - **Move.** Mod-Shift-n moves the focused window with the same cycling and stays put.
 - **Decided.** One workspace per window and one visible workspace: awesome's tag
   toggles (Mod-Ctrl-n, Mod-Ctrl-Shift-n) are dropped.
@@ -163,34 +169,31 @@ release.
   desktops, current desktop, window desktop, fullscreen and above states, struts for
   a bar.
 - **IPC.** A Unix socket and `sugoictl` to query state, run actions and evaluate Ruby.
-- **Bar.** The chosen bar (open question) shows workspaces and the systray in the
-  integration suite or a manual check.
+- **Bar.** polybar shows the workspaces, the focused window's title and the systray,
+  with a struts-aware layout; checked by hand in Xephyr. The awesome status widgets
+  (CPU, updates, claude, codex, volume, keyboard layout, clock) become polybar script
+  modules.
 
 ### M8 Release
 
-- The daily-drive period, the footprint measurement, the parity check, the 0.1 report,
+- The 2-day daily-drive period, the footprint measurement, the parity check, the 0.1 report,
   the changelog, and release 0.1.0.
 
 ## Out of scope
 
 - **Multi-monitor,** by decision: the user uses one monitor.
 - **Workspace freezing,** by decision: it stops background work and breaks connections.
-- **Bar, widgets, systray, notifications and menus,** left to external programs; the
-  awesome status widgets move to the bar's scripts.
+- **Bar, widgets, systray, notifications and menus,** left to external programs;
+  polybar is the bar and dunst the notification daemon (user).
+- **Window list** (awesome's tasklist), by decision: the user does not use it.
 - **Fair, bottom and top tile layouts,** by decision: three layouts only.
+- **Swap with master,** by decision: the user does not need it.
 - **Titlebars,** disabled in the current config too.
 - **Compositing and Wayland;** picom can run beside sugoi.
 
 ## Open questions
 
-- **Bar.** Which external bar replaces the wibar (taglist, tasklist, systray)? polybar
-  and eww are not installed.
-- **Notifications.** Which daemon replaces naughty? dunst is the usual X11 choice.
-- **Banks.** 9 or 10 workspaces per bank (does Mod-0 count), and how many banks: 3?
-- **Empty workspaces.** Does cycling skip empty workspaces past the first bank?
-- **Daily drive.** How long a period closes 0.1? Judgment (agent): 5 working days.
-- **Overlaps.** Mod-Shift-q and Mod-Ctrl-Return mean two things today, depending on
-  focus. Keep that behavior or pick new chords?
+- None; settled with the user on 2026-10-31 (see the decision notes).
 
 ## Risks
 
