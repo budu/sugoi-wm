@@ -1,0 +1,67 @@
+# Core window management
+
+The source of truth for how sugoi manages windows on one X11 screen. Tests cite the
+identifiers in brackets. Later milestones extend this document: layouts (M3),
+workspaces (M4), rules (M5), EWMH (M7).
+
+sugoi is a non-reparenting window manager: it draws no frames or titlebars, so the
+border is the client window's own X border, and windows stay usable if sugoi exits.
+
+## Startup
+
+- **[S1] One WM per display.** sugoi selects `SubstructureRedirect` on the root window.
+  If another client holds it, sugoi exits with status 1 and the message "another
+  window manager is running on <display>".
+- **[S2] Adoption.** At startup, every child of the root that is viewable and not
+  override-redirect is managed as if it had just been mapped, except that focus goes
+  to the window under the pointer if there is one.
+- **[S3] Connection loss.** If the X connection closes, sugoi exits with status 1 and
+  logs the cause.
+
+## Managing
+
+- **[M1] Manage.** A `MapRequest` for a window that is not override-redirect makes it
+  managed: sugoi sets its border width and normal border color, selects
+  `EnterWindow`, `FocusChange`, `PropertyChange` and `StructureNotify` on it, sets
+  `WM_STATE` to `NormalState`, maps it and focuses it ([F1]).
+- **[M2] Override-redirect.** Override-redirect windows (menus, tooltips, popups) are
+  never managed, focused or given a border.
+- **[M3] Configure.** A `ConfigureRequest` from an unmanaged window is applied as
+  asked. From a managed window, position, size and stacking are applied as asked
+  until layouts exist (M3); the border width stays sugoi's. When nothing changes,
+  sugoi sends a synthetic `ConfigureNotify` with the current geometry (ICCCM 4.1.5).
+- **[M4] Unmanage.** A managed window stops being managed when it is destroyed or
+  unmapped by its client; sugoi deletes its `WM_STATE` and, if it had the focus,
+  focuses the next window ([F5]).
+- **[M5] Vanished windows.** Requests on a window that no longer exists fail with an
+  X error; sugoi logs it at debug level and carries on.
+
+## Focus
+
+- **[F1] New windows take focus.** A newly managed window is focused and raised.
+- **[F2] Sloppy focus.** The pointer entering a managed window focuses it. Only
+  `EnterNotify` events in normal mode count; grab and ungrab crossings do not.
+- **[F3] Click to focus.** A button press on a managed window focuses and raises it,
+  and the press still reaches the window.
+- **[F4] Input model** (ICCCM 4.1.7). Focusing a window sets the X input focus to it
+  when its `WM_HINTS` input flag is true or absent, and sends `WM_TAKE_FOCUS` when its
+  `WM_PROTOCOLS` lists it. A window with neither cannot be focused; the focus stays.
+- **[F5] Focus history.** sugoi keeps the managed windows in focus order. When the
+  focused window is unmanaged, the most recently focused remaining window gets the
+  focus; with none left, the focus goes to the root (`PointerRoot`).
+- **[F6] Borders.** The focused window's border has the focused color, every other
+  managed window's the normal color. Defaults, from the awesome config: width 3 px,
+  focused `#aa007b`, normal `#000000`.
+
+## Closing
+
+- **[K1] Close.** Closing a window sends `WM_DELETE_WINDOW` when its `WM_PROTOCOLS`
+  lists it, and otherwise kills its client (`KillClient`).
+
+## Commands
+
+Until the Ruby config (M2) and IPC (M7) exist, commands reach sugoi through its
+library API (`Handle`), which the tests use.
+
+- **[C1] Close focused.** Closes the focused window ([K1]); does nothing without one.
+- **[C2] Quit.** sugoi exits with status 0. Managed windows stay mapped.
