@@ -50,7 +50,9 @@ pub struct Wm {
     /// [F5] Managed windows, most recently focused first.
     history: Vec<Window>,
     focused: Option<Window>,
-    /// The latest server timestamp seen, for focus and protocol messages.
+    /// The latest server timestamp seen, for protocol messages. `SetInputFocus` uses
+    /// `CurrentTime` instead: a focus set at `CurrentTime` moves the server's
+    /// last-focus-change time past earlier event stamps, and X ignores older requests.
     time: Timestamp,
     commands: Receiver<Command>,
     wake: UnixStream,
@@ -156,7 +158,8 @@ impl Wm {
             else {
                 continue;
             };
-            if attributes.map_state == MapState::VIEWABLE && !attributes.override_redirect {
+            // manage() leaves override-redirect windows alone.
+            if attributes.map_state == MapState::VIEWABLE {
                 self.manage(window, false)?;
             }
         }
@@ -281,7 +284,11 @@ impl Wm {
             match next {
                 Some(next) => self.focus(next, false)?,
                 None => {
-                    self.conn.set_input_focus(InputFocus::POINTER_ROOT, POINTER_ROOT, self.time)?;
+                    self.conn.set_input_focus(
+                        InputFocus::POINTER_ROOT,
+                        POINTER_ROOT,
+                        CURRENT_TIME,
+                    )?;
                 }
             }
         }
@@ -334,7 +341,7 @@ impl Wm {
             self.conn.change_window_attributes(previous, &normal)?;
         }
         if accepts_input {
-            self.conn.set_input_focus(InputFocus::POINTER_ROOT, window, self.time)?;
+            self.conn.set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)?;
         }
         if take_focus {
             self.send_protocol(window, self.atoms.WM_TAKE_FOCUS)?;

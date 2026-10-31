@@ -140,13 +140,14 @@ fn m5_vanished_windows_do_not_stop_the_wm() {
 #[test]
 fn f1_new_windows_are_focused_and_raised() {
     let session = Session::new();
+    // b is created first, so it starts below a.
+    let b = session.app(AppSpec::at(100, 100, 300, 200));
     let a = session.app(AppSpec::at(0, 0, 300, 200));
     a.map();
     eventually("a focused", || session.focus() == a.window);
-    let b = session.app(AppSpec::at(100, 100, 300, 200));
     b.map();
     eventually("b focused", || session.focus() == b.window);
-    assert!(session.above(b.window, a.window));
+    eventually("b raised", || session.above(b.window, a.window));
 }
 
 /// [F2]
@@ -161,6 +162,36 @@ fn f2_pointer_entering_a_window_focuses_it_without_raising() {
     session.move_pointer(50, 50);
     eventually("a focused", || session.focus() == a.window);
     assert!(session.above(b.window, a.window));
+}
+
+/// [F2]
+#[test]
+fn f2_grab_crossings_do_not_move_the_focus() {
+    let session = Session::new();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(400, 0, 300, 200));
+    a.map();
+    session.move_pointer(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    // b grabs the pointer, as an open menu does, while the pointer rests over a: a
+    // gets crossing events in grab and ungrab mode.
+    let grab = b.conn.grab_pointer(
+        false,
+        b.window,
+        EventMask::BUTTON_PRESS,
+        GrabMode::ASYNC,
+        GrabMode::ASYNC,
+        x11rb::NONE,
+        x11rb::NONE,
+        x11rb::CURRENT_TIME,
+    );
+    assert_eq!(grab.unwrap().reply().unwrap().status, GrabStatus::SUCCESS);
+    b.conn.ungrab_pointer(x11rb::CURRENT_TIME).unwrap();
+    b.conn.sync().unwrap();
+    settle();
+    assert_eq!(session.focus(), b.window);
 }
 
 /// [F3]
