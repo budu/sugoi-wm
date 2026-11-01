@@ -53,7 +53,6 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE_UTILITY,
         _NET_WM_WINDOW_TYPE_TOOLBAR,
         _NET_WM_WINDOW_TYPE_MENU,
-        _NET_WM_PID,
     }
 }
 
@@ -69,6 +68,8 @@ struct Client {
     hints: Hints,
     /// [U1]
     info: Info,
+    /// [A3] The unit of its process when it was managed, for hooks.
+    unit: Option<String>,
     /// The border width before sugoi managed the window, restored on withdrawal.
     border_width: u16,
     /// The outer rectangle the window has when it floats.
@@ -140,8 +141,6 @@ pub struct Wm {
     later_hooks: VecDeque<(HookEvent, HookArg)>,
     /// How many configs have loaded, so a hook's `reload` stops its event's hooks.
     loads: u64,
-    /// [A2] This host's name.
-    host: String,
     /// [A4] The cgroup sugoi itself runs in, whose unit `kill` never stops.
     own_cgroup: Option<String>,
     /// [Y7]
@@ -245,7 +244,6 @@ impl Wm {
             in_hook: false,
             later_hooks: VecDeque::new(),
             loads: 0,
-            host: apps::host(),
             own_cgroup: apps::cgroup("self"),
             layouts: vec![Layout::Tile],
             desks: vec![
@@ -826,6 +824,7 @@ impl Wm {
         let rect = Rect::new(geometry.x.into(), geometry.y.into(), width + border, height + border);
         let client = Client {
             hints,
+            unit: info.pid.and_then(apps::unit_of),
             info,
             border_width: geometry.border_width,
             rect: if map { self.initial_rect(rect, positioned) } else { rect },

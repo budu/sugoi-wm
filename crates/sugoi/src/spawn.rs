@@ -26,10 +26,10 @@ pub fn spawn(name: &str, argv: &[String], limits: &Limits) {
     start(command.iter().map(String::as_str));
 }
 
-/// [A4] Stops a systemd user unit, with every process in it.
-pub fn stop_unit(unit: &str) {
-    info!("stop {unit}");
-    start(["systemctl", "--user", "stop", unit]);
+/// [A4] Kills every process of a systemd user unit; false if `systemctl` cannot run.
+pub fn kill_unit(unit: &str) -> bool {
+    info!("kill {unit}");
+    start(["systemctl", "--user", "kill", "--signal=SIGKILL", unit])
 }
 
 /// Shows `message` through the notification daemon (dunst), if there is one.
@@ -40,18 +40,22 @@ pub fn notify(message: &str) {
 /// Runs `argv` through `setsid -f`, so the program is never sugoi's child: it is reaped
 /// across a restart, and gets no signal sent to sugoi's group. `setsid` forks and exits
 /// at once, so waiting for it does not block.
-fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
+fn start<'a>(argv: impl IntoIterator<Item = &'a str>) -> bool {
     let mut argv = argv.into_iter();
-    let Some(program) = argv.next() else { return };
+    let Some(program) = argv.next() else { return false };
     // `setsid -f` exits 0 even when the program is missing, so look first.
     if !on_path(program) {
         warn!("cannot start {program}: not found on PATH");
-        return;
+        return false;
     }
     let mut command = Command::new("setsid");
     command.arg("-f").arg(program).args(argv).stdin(Stdio::null());
-    if let Err(e) = command.spawn().and_then(|mut setsid| setsid.wait()) {
-        warn!("cannot start {program}: {e}");
+    match command.spawn().and_then(|mut setsid| setsid.wait()) {
+        Ok(_) => true,
+        Err(e) => {
+            warn!("cannot start {program}: {e}");
+            false
+        }
     }
 }
 

@@ -153,10 +153,17 @@ each section.
   WM in `session-3.scope`, so a window of something the X session started shares it;
   and the test shell ran inside Emacs's app scope. `kill` stops a unit only when it is a
   scope in the user manager's `app.slice` and not sugoi's cgroup; else it closes.
-- **A process ID counts only with this host's `WM_CLIENT_MACHINE`** (M6), as ICCCM asks;
-  a remote client's pid would name an unrelated local process.
-- **Kill cases use real scopes they start** (M6), named `sugoi-test-*`, never with a
-  test process's own pid; the own-scope guard is a unit test of a pure function, since
+- **A window's process comes from the X server** (M6, review). `_NET_WM_PID` can be
+  stale and reused by another app, or name a process in a sandbox's namespace, and
+  `kill` would then end an unrelated app. X-Resource's `QueryClientIds` gives the
+  process behind the window's connection, read by the server from the socket; Xorg and
+  Xvfb both have the extension.
+- **`kill` is SIGKILL** (M6, review): `systemctl stop` waits up to `TimeoutStopSec`
+  (90 s) on an app that ignores SIGTERM; awesome's kill was as abrupt (`KillClient`).
+  `close` stays the gentle way.
+- **Kill cases use real scopes they start** (M6), named `sugoi-test-*`, with an xterm
+  inside, whose connection is the scope's process; test windows of the test process
+  never get a `kill`. The own-scope guard is a unit test of a pure function, since
   testing it for real would aim at the editor running the tests.
 - **Apps start through `setsid -f`** (M2, review). `systemd-run --scope` runs the app
   as the caller's child; through `setsid -f` it is never sugoi's, so nothing is left to

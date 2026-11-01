@@ -4,7 +4,7 @@ use x11rb::protocol::xproto::Window;
 
 use super::Wm;
 use crate::Error;
-use crate::spawn::stop_unit;
+use crate::spawn::kill_unit;
 
 /// [A3] The cgroup v2 path of process `pid` (`/user.slice/.../run-p1-i2.scope`).
 pub(super) fn cgroup(pid: &str) -> Option<String> {
@@ -24,34 +24,26 @@ fn app_scope(path: &str) -> bool {
     in_app_slice && path.ends_with(".scope")
 }
 
-/// [A4] The unit `kill` may stop for a process in cgroup `path`: a scope in the user
+/// [A4] The unit `kill` may kill for a process in cgroup `path`: a scope in the user
 /// manager's `app.slice`, but never `own`, the cgroup sugoi runs in.
 fn killable(path: &str, own: Option<&str>) -> Option<String> {
     (app_scope(path) && Some(path) != own).then(|| unit(path)).flatten()
 }
 
-/// This host's name, which `WM_CLIENT_MACHINE` must give for a process ID to count ([A2]).
-pub(super) fn host() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default().trim().to_owned()
+/// [A3] The unit process `pid` is in.
+pub(super) fn unit_of(pid: u32) -> Option<String> {
+    unit(&cgroup(&pid.to_string())?)
 }
 
 impl Wm {
-    /// [A3] The unit of `window`'s process, if known.
-    pub(super) fn unit_of(&self, window: Window) -> Option<String> {
-        let pid = self.clients.get(&window)?.info.pid?;
-        unit(&cgroup(&pid.to_string())?)
-    }
-
-    /// [A4] Stops the unit of `window`'s app if that is safe, else closes the window.
+    /// [A4] Kills the unit of `window`'s app if that is safe, else closes the window. The
+    /// cgroup is read again: the process is the window's connection's, so it lives.
     pub(super) fn kill(&mut self, window: Window) -> Result<(), Error> {
         let path =
             self.clients.get(&window).and_then(|c| c.info.pid).and_then(|p| cgroup(&p.to_string()));
         match path.and_then(|path| killable(&path, self.own_cgroup.as_deref())) {
-            Some(unit) => {
-                stop_unit(&unit);
-                Ok(())
-            }
-            None => self.close(window),
+            Some(unit) if kill_unit(&unit) => Ok(()),
+            _ => self.close(window),
         }
     }
 }

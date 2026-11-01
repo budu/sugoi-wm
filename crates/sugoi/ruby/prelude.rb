@@ -277,7 +277,7 @@ module Sugoi
     def memory(value)
       return "" if value.nil?
       return value.to_s if value.is_a?(Integer) && value.positive?
-      return value if value.is_a?(String) && value.match?(/\A\d+[KMGT]?\z/)
+      return value if value.is_a?(String) && value.match?(/\A[1-9]\d*[KMGT]?\z/)
 
       raise ArgumentError, "memory must be bytes or a number with K, M, G or T, not #{value.inspect}"
     end

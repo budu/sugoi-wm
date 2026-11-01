@@ -2,6 +2,7 @@
 
 use x11rb::errors::ReplyError;
 use x11rb::properties::WmClass;
+use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _, QueryClientIdsReply};
 use x11rb::protocol::xproto::*;
 
 use super::{Wm, vanished};
@@ -15,8 +16,7 @@ pub(super) struct InfoCookies<'c> {
     name: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     kind: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     transient: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
-    pid: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
-    machine: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
+    pid: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, QueryClientIdsReply>,
 }
 
 impl Wm {
@@ -40,8 +40,11 @@ impl Wm {
             name: get(AtomEnum::WM_NAME.into(), AtomEnum::ANY)?,
             kind: get(a._NET_WM_WINDOW_TYPE, AtomEnum::ATOM)?,
             transient: get(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)?,
-            pid: get(a._NET_WM_PID, AtomEnum::CARDINAL)?,
-            machine: get(AtomEnum::WM_CLIENT_MACHINE.into(), AtomEnum::STRING)?,
+            // [A2] The server knows the process behind each local connection.
+            pid: self.conn.res_query_client_ids(&[ClientIdSpec {
+                client: window,
+                mask: ClientIdMask::LOCAL_CLIENT_PID,
+            }])?,
         })
     }
 
@@ -59,10 +62,15 @@ impl Wm {
             .and_then(|r| r.value32().map(|v| v.collect()))
             .unwrap_or_default();
         let transient = vanished(cookies.transient.reply())?.is_some_and(|r| r.value_len > 0);
-        // [A2] A process ID counts only on this host.
-        let pid = vanished(cookies.pid.reply())?.and_then(|r| r.value32()?.next());
-        let machine = vanished(cookies.machine.reply())?.map(|r| self.decode(&r));
-        let pid = pid.filter(|_| machine.as_deref() == Some(self.host.as_str()));
+        // [A2] None for a remote client, or a server without X-Resource.
+        let pid = cookies.pid.reply().ok().and_then(|r| {
+            r.ids
+                .iter()
+                .find(|id| id.spec.mask == ClientIdMask::LOCAL_CLIENT_PID)?
+                .value
+                .first()
+                .copied()
+        });
         Ok(Info {
             class,
             instance,
@@ -167,7 +175,7 @@ impl Wm {
         Snapshot {
             id: window,
             info: c.info.clone(),
-            unit: self.unit_of(window),
+            unit: c.unit.clone(),
             workspace: c.workspace as u32 + 1,
             floating: c.floating || c.maximized || c.fullscreen || !self.tiled_layout(window),
         }

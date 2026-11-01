@@ -773,12 +773,18 @@ fn a1_a_bad_limit_fails_the_block() {
 /// [A5]
 #[test]
 fn a5_hooks_see_the_windows_process_and_unit() {
-    let Some(scope) = Scope::start("app-sugoitest.slice") else { return };
     let mut session =
         Session::with_config("on(:manage) { |w| spawn \"seen\", w.pid.inspect, w.unit.inspect }\n");
-    let spec = AppSpec { process: Some((scope.pid(), host())), ..AppSpec::at(0, 0, 200, 100) };
-    let app = session.app(spec);
-    app.map();
+    let Some(scope) = Scope::start("app-sugoitest.slice", &session.x.display) else { return };
     let expected = spawned("seen", &format!("seen {} \"{}\"", scope.pid(), scope.unit));
     eventually("hook", || spawns(&mut session).contains(&expected));
+}
+
+/// [A1] A memory limit of zero would end the app at once.
+#[test]
+fn a1_a_zero_memory_limit_fails_the_block() {
+    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"x\", memory: \"0G\" }\n");
+    session.keys(&[SUPER, X]);
+    eventually("notified", || !notifications(&mut session).is_empty());
+    assert!(spawns(&mut session).is_empty());
 }

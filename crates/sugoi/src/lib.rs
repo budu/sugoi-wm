@@ -254,7 +254,7 @@ pub struct Info {
     pub title: String,
     pub kind: Option<WindowType>,
     pub transient: bool,
-    /// [A2] `_NET_WM_PID`, when `WM_CLIENT_MACHINE` is this host.
+    /// [A2] The process of the window's X connection, for a local client.
     pub pid: Option<u32>,
 }
 
