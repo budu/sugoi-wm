@@ -77,7 +77,7 @@ and then call `sugoictl` once IPC exists (M7).
 | feh float, 2000×1200, center | rule by class                          | M5              |
 | Browsers: 2nd on a tag floats | `on :manage` hook with a query        | M5              |
 | Emacs, Cursor as master      | rule by class                          | M5              |
-| Zed as master (FIXME)        | rule by instance, a test case          | M5              |
+| Zed as master (FIXME)        | rule by instance or class, again late  | M5              |
 
 ## Outside bindings and rules
 

@@ -125,6 +125,23 @@ each section.
 - **dunst for notifications** (user, 2026-10-31). It replaces awesome's naughty, and
   sugoi reports config errors through it.
 
+## Rules
+
+- **Rules are data, hooks are Ruby** (M5). Matchers and effects go to Rust, so rules
+  need no Ruby call per window and the built-in ones work without a config; only hooks
+  call into Ruby, once per event, with snapshots of the windows.
+- **Exact strings or lists, no regular expressions** (M5), as awesome's `rule` and
+  `rule_any`; Rust and Ruby regular expressions differ, and no awesome rule needed one.
+- **Rules apply again when `WM_CLASS` changes** (M5). The awesome Zed rule never
+  matched; an app setting its class after the map is one explanation, and this covers
+  it either way. Zed needs DRI3, which Xvfb lacks, so it could not be checked here.
+- **Manage hooks only for new windows** (M5), so a restart does not run them again on
+  every adopted window (the browser hook would float windows that were tiled).
+- **No hooks during a hook's actions** (M5): a `:focus` hook that moves the focus would
+  otherwise run itself without end.
+- **Hidden windows refuse the focus** (M5), in `focus()` itself: X ignores the request,
+  but sugoi would have believed the window focused.
+
 ## Spawning
 
 - **Apps start through `setsid -f`** (M2, review). `systemd-run --scope` runs the app

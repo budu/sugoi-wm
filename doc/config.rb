@@ -66,5 +66,29 @@ root_button("5") { workspace :previous }
 button("Mod-1") { move }
 button("Mod-3") { resize }
 
+# Rules (rules.lua). Dialogs, transients, splash and utility windows float already.
+rule class: "Soffice", float: true, size: [2000, 1200], center: true
+rule class: %w[Caprine Thunar], float: true
+rule class: "feh", float: true, size: [2000, 1200], center: true
+rule class: %w[Emacs Cursor], master: true
+# Zed's WM_CLASS is unverified (`xprop WM_CLASS` on its window tells); rules apply again
+# if it comes after the map, which may be why the awesome rule never matched.
+rule instance: "dev.zed.Zed", master: true
+rule class: "dev.zed.Zed", master: true
+
+# Float browser windows but the first one on a workspace
+BROWSERS = %w[Chromium firefox].freeze
+on(:manage) do |window|
+  next unless BROWSERS.include?(window.class_name)
+
+  here = windows(workspace: window.workspace)
+  browsers = here.count { |w| BROWSERS.include?(w.class_name) }
+  if browsers > 1
+    window.float
+    window.size 3000, 1300
+    window.center
+  end
+end
+
 # The root window's menu
 root_button("3") { spawn "rofi", "-show", "drun" }
