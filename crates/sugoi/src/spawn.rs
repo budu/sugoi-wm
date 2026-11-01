@@ -1,6 +1,5 @@
 //! Starting programs ([P1]) and notifications ([L4], [R1]).
 
-use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
 
@@ -10,26 +9,26 @@ use log::{info, warn};
 pub fn spawn(name: &str, argv: &[String]) {
     info!("spawn {name}: {argv:?}");
     let slice = format!("--slice=app-{}.slice", unit_name(name));
-    let mut command = Command::new("systemd-run");
-    command.args(["--user", "--scope", "--collect", "--quiet", &slice, "--"]).args(argv);
-    start(command);
+    let systemd_run = ["systemd-run", "--user", "--scope", "--collect", "--quiet", &slice, "--"];
+    start(systemd_run.iter().copied().chain(argv.iter().map(String::as_str)));
 }
 
 /// Shows `message` through the notification daemon (dunst), if there is one.
 pub fn notify(message: &str) {
-    let mut command = Command::new("notify-send");
-    command.args(["--app-name=sugoi", "sugoi", message]);
-    start(command);
+    start(["notify-send", "--app-name=sugoi", "sugoi", message]);
 }
 
-/// Runs `command` detached from sugoi's process group, and reaps it in a thread.
-fn start(mut command: Command) {
-    command.stdin(Stdio::null()).process_group(0);
+/// Runs `argv` through `setsid -f`, so the program is never sugoi's child: it is reaped
+/// across a restart, and gets no signal sent to sugoi's group. A thread reaps `setsid`,
+/// which exits at once.
+fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
+    let mut command = Command::new("setsid");
+    command.arg("-f").args(argv).stdin(Stdio::null());
     match command.spawn() {
         Ok(mut child) => {
             thread::spawn(move || child.wait());
         }
-        Err(e) => warn!("cannot start {:?}: {e}", command.get_program()),
+        Err(e) => warn!("cannot start {command:?}: {e}"),
     }
 }
 

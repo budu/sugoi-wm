@@ -20,6 +20,10 @@ hooks (M5), spawn limits (M6).
   with its file and line and shown with `notify-send` (dunst).
 - **[L5] Reload.** The `reload` action loads the file again. On success, the new
   bindings replace the old ones and the border settings apply to every managed window.
+- **[L6] Load time limit.** A file still loading after 5 s is stopped, and the load
+  fails ([L4]).
+- **[L7] Taken chords.** A key chord another program has grabbed cannot be bound; sugoi
+  names it with `notify-send`, and the other chords work.
 
 ## DSL
 
@@ -33,12 +37,14 @@ hooks (M5), spawn limits (M6).
   `xev` prints it (`Return`, `j`, `semicolon`, `XF86AudioMute`), or `#<keycode>` for a
   physical key (`#10` is the key labeled 1 on most layouts). A later `key` with the
   same chord replaces the earlier one.
-- **[D4] Buttons.** `button "Mod-1" do ... end` binds a button chord (`1` to `5`). On a
-  managed window the window is focused first, the press is consumed instead of reaching
-  the window, and then the block runs; on the root window, the block runs.
+- **[D4] Buttons.** `button "Mod-1" do ... end` binds a button chord (`1` to `5`) on
+  managed windows: the window is focused, the press is consumed instead of reaching the
+  window, and then the block runs. A chord without modifiers takes that button from
+  every application, so window chords normally use `Mod`.
 - **[D5] Actions.** Blocks call actions, which run in order once the block returns:
   - `focus :next` and `focus :previous` move the focus along the window order (the
-    order windows were managed in, changed by `swap`), wrapping, and raise the window.
+    order windows were managed in, changed by `swap`), wrapping, to the next window that
+    can take the focus ([F4]), and raise it.
   - `swap :next` and `swap :previous` swap the focused window with its neighbor in the
     window order; the focus stays on it.
   - `close` closes the focused window ([K1]).
@@ -47,6 +53,8 @@ hooks (M5), spawn limits (M6).
   - `sh "overmind restart -s ~/x.sock"` is `spawn "sh", "-c", ...` named `sh`.
   - `reload` reloads the config ([L5]); `restart` replaces the sugoi process with a new
     one started the same way, which adopts the windows ([S2]); `quit` exits ([C2]).
+- **[D6] Root buttons.** `root_button "3" do ... end` binds a button chord on the root
+  window, where no window covers it, as awesome's `root.buttons` does.
 
 ## Running blocks
 
@@ -62,5 +70,6 @@ hooks (M5), spawn limits (M6).
 
 - **[P1] Scope.** `spawn` runs `systemd-run --user --scope --collect --quiet
   --slice=app-<name>.slice -- <argv>`, as the awesome config does, so each app gets its
-  own cgroup scope. The app inherits sugoi's environment, and sugoi reaps it when it
-  exits. M6 replaces the mechanism.
+  own cgroup scope. It starts through `setsid -f`, so it inherits sugoi's environment
+  but is not sugoi's child: no zombie is left when it exits, even after a restart, and
+  no signal to sugoi's process group reaches it. M6 replaces the mechanism.

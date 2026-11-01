@@ -58,7 +58,10 @@ pub struct Settings {
     /// [D2] What `Mod` stands for.
     pub modkey: String,
     pub keys: Vec<Binding>,
+    /// [D4] Chords on managed windows.
     pub buttons: Vec<Binding>,
+    /// [D6] Chords on the root window.
+    pub root_buttons: Vec<Binding>,
 }
 
 impl Default for Settings {
@@ -77,6 +80,7 @@ impl Default for Settings {
                 Binding::commands("Mod-Ctrl-r", vec![Command::Reload]),
             ],
             buttons: Vec::new(),
+            root_buttons: Vec::new(),
         }
     }
 }

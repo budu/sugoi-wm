@@ -200,10 +200,10 @@ fn d4_a_button_on_a_window_focuses_it_and_consumes_the_press() {
     }
 }
 
-/// [D4]
+/// [D6]
 #[test]
-fn d4_a_button_on_the_root_runs_the_block() {
-    let mut session = Session::with_config("button(\"3\") { spawn \"menu\" }\n");
+fn d6_a_root_button_runs_its_block() {
+    let mut session = Session::with_config("root_button(\"3\") { spawn \"menu\" }\n");
     session.press(900, 500, 3);
     eventually("spawned", || spawns(&mut session) == [spawned("menu", "menu")]);
 }
@@ -375,4 +375,107 @@ fn l2_the_example_config_loads() {
     session.keys(&[SUPER, RETURN]);
     eventually("kitty", || spawns(&mut session) == [spawned("kitty", "/usr/bin/kitty")]);
     assert!(notifications(&mut session).is_empty());
+}
+
+/// [D6]
+#[test]
+fn d6_root_buttons_leave_the_windows_their_clicks() {
+    let mut session = Session::with_config("root_button(\"3\") { spawn \"menu\" }\n");
+    let events = EventMask::BUTTON_PRESS;
+    let app = session.app(AppSpec { events, ..AppSpec::at(0, 0, 200, 200) });
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    session.press(50, 50, 3);
+    app.expect_event("button 3", |e| matches!(e, Event::ButtonPress(p) if p.detail == 3));
+    settle();
+    assert!(spawns(&mut session).is_empty());
+}
+
+/// [L4]
+#[test]
+fn l4_a_failed_reload_keeps_a_config_without_keys() {
+    let mut session = Session::with_config("border width: 5\nroot_button(\"3\") { reload }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 200));
+    app.map();
+    eventually("border 5", || session.geometry(app.window).unwrap().border_width == 5);
+    rewrite(&mut session, "border width: 9\nkey(\"Mod-x\") {\n");
+    session.press(900, 500, 3);
+    eventually("notified", || notifications(&mut session).len() == 1);
+    settle();
+    assert_eq!(session.geometry(app.window).unwrap().border_width, 5);
+}
+
+/// [L6]
+#[test]
+fn l6_a_config_still_loading_after_5_s_is_stopped() {
+    let mut session = Session::starting("border width: 9\nsleep 30\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 200));
+    app.map();
+    let limit = std::time::Duration::from_secs(10);
+    eventually_within(limit, "managed", || session.wm_state(app.window).is_some());
+    assert_eq!(session.geometry(app.window).unwrap().border_width, 3);
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("execution expired"), "{notes:?}");
+}
+
+/// [L7]
+#[test]
+fn l7_a_chord_another_program_holds_is_reported() {
+    let mut session = Session::with_config("key(\"Mod-Ctrl-r\") { reload }\n");
+    let mods = ModMask::M4;
+    let grab =
+        session.conn.grab_key(false, session.root, mods, X, GrabMode::ASYNC, GrabMode::ASYNC);
+    grab.unwrap().check().unwrap();
+    rewrite(&mut session, "key(\"Mod-Ctrl-r\") { reload }\nkey(\"Mod-x\") { close }\n");
+    session.keys(&[SUPER, CTRL, R]);
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].ends_with("taken by another program: Mod-x"), "{notes:?}");
+}
+
+/// [D5] and [F4]
+#[test]
+fn d5_focus_skips_windows_that_cannot_take_it() {
+    let session = Session::with_config(FOCUS_KEYS);
+    let a = session.app(AppSpec::at(0, 0, 200, 200));
+    let inert = session.app(AppSpec { input: Some(false), ..AppSpec::at(300, 0, 200, 200) });
+    let c = session.app(AppSpec::at(600, 0, 200, 200));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    inert.map();
+    eventually("inert managed", || session.wm_state(inert.window).is_some());
+    c.map();
+    eventually("c focused", || session.focus() == c.window);
+    session.keys(&[SUPER, K]);
+    eventually("wrapped to a", || session.focus() == a.window);
+    session.keys(&[SUPER, K]);
+    eventually("past inert to c", || session.focus() == c.window);
+}
+
+/// [P1]
+#[test]
+fn p1_spawned_apps_are_not_sugois_children() {
+    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"sleep\", \"10\" }\n");
+    session.keys(&[SUPER, X]);
+    eventually("spawned", || spawns(&mut session) == [spawned("sleep", "sleep 10")]);
+    let pid = session.binary().pid().to_string();
+    let children = || {
+        let out = std::process::Command::new("pgrep").args(["-P", &pid]).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    eventually("no children", || children().trim().is_empty());
+}
+
+/// [C3]
+#[test]
+fn c3_sigterm_quits_like_quit() {
+    let mut session = Session::with_config("");
+    let app = session.app(AppSpec::at(0, 0, 200, 200));
+    app.map();
+    eventually("border 3", || session.geometry(app.window).unwrap().border_width == 3);
+    let pid = session.binary().pid().to_string();
+    std::process::Command::new("kill").args(["-TERM", &pid]).status().unwrap();
+    eventually("exited", || session.binary().status().is_some());
+    assert!(session.binary().status().unwrap().success());
+    assert_eq!(session.geometry(app.window).unwrap().border_width, 0);
 }

@@ -5,10 +5,12 @@ use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use log::{debug, info};
 use rustix::event::{PollFd, PollFlags, poll};
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use x11rb::connection::Connection;
 use x11rb::errors::{ConnectionError, ReplyError};
 use x11rb::properties::WmHints;
@@ -21,7 +23,7 @@ use x11rb::{CURRENT_TIME, NONE};
 use crate::chord::{self, Key};
 use crate::keyboard::Keyboard;
 use crate::spawn::{notify, spawn};
-use crate::{Action, Border, Command, Defaults, Direction, Error, Handle, Script, Settings};
+use crate::{Action, Border, Command, Direction, Error, Handle, Script, Settings};
 
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
@@ -76,10 +78,14 @@ pub struct Wm {
     border: Border,
     keyboard: Keyboard,
     /// [D3] Key chords as configured, bound to keycodes by `grab_keys`.
-    key_chords: Vec<(ModMask, Key, Action)>,
+    key_chords: Vec<(String, ModMask, Key, Action)>,
     keys: HashMap<(u16, Keycode), Action>,
     /// [D4]
     buttons: HashMap<(u16, u8), Action>,
+    /// [D6]
+    root_buttons: HashMap<(u16, u8), Action>,
+    /// Whether a config has loaded, so a failed reload keeps it ([L4]).
+    loaded: bool,
     clients: HashMap<Window, Client>,
     /// [D5] Managed windows in the order `focus` and `swap` follow.
     order: Vec<Window>,
@@ -87,6 +93,8 @@ pub struct Wm {
     history: Vec<Window>,
     focused: Option<Window>,
     exit: Option<Exit>,
+    /// [C3] Set by SIGTERM, SIGINT and SIGHUP.
+    terminate: Arc<AtomicBool>,
     commands: Receiver<Command>,
     wake: UnixStream,
     handle: Handle,
@@ -132,11 +140,14 @@ impl Wm {
             key_chords: Vec::new(),
             keys: HashMap::new(),
             buttons: HashMap::new(),
+            root_buttons: HashMap::new(),
+            loaded: false,
             clients: HashMap::new(),
             order: Vec::new(),
             history: Vec::new(),
             focused: None,
             exit: None,
+            terminate: Arc::new(AtomicBool::new(false)),
             commands,
             wake,
             handle,
@@ -150,6 +161,16 @@ impl Wm {
 
     pub fn handle(&self) -> Handle {
         self.handle.clone()
+    }
+
+    /// [C3] Makes SIGTERM, SIGINT and SIGHUP quit as [C2] does. For the binary: the
+    /// handlers are process-wide.
+    pub fn quit_on_signals(&self) -> Result<(), Error> {
+        for signal in [SIGTERM, SIGINT, SIGHUP] {
+            signal_hook::flag::register(signal, Arc::clone(&self.terminate))?;
+            signal_hook::low_level::pipe::register(signal, self.handle.wake.try_clone()?)?;
+        }
+        Ok(())
     }
 
     /// Runs until [C2] quits it (`Ok`) or the connection is lost ([S3]). A restart
@@ -194,18 +215,22 @@ impl Wm {
     fn next_command(&mut self) -> Option<Command> {
         let mut bytes = [0; 64];
         while matches!((&self.wake).read(&mut bytes), Ok(n) if n > 0) {}
+        if self.terminate.swap(false, Ordering::SeqCst) {
+            return Some(Command::Quit);
+        }
         self.commands.try_recv().ok()
     }
 
     fn execute(&mut self, command: Command) -> Result<(), Error> {
         match command {
             Command::Focus(direction) => {
-                if let Some(window) = self.neighbor(direction) {
+                if let Some(window) = self.neighbor(direction, true) {
                     self.focus(window, true)?;
                 }
             }
             Command::Swap(direction) => {
-                if let (Some(focused), Some(other)) = (self.focused, self.neighbor(direction)) {
+                let other = self.neighbor(direction, false);
+                if let (Some(focused), Some(other)) = (self.focused, other) {
                     let a = self.order.iter().position(|&w| w == focused);
                     let b = self.order.iter().position(|&w| w == other);
                     if let (Some(a), Some(b)) = (a, b) {
@@ -226,15 +251,23 @@ impl Wm {
         Ok(())
     }
 
-    /// [D5] The window after or before the focused one in the window order, wrapping.
-    fn neighbor(&self, direction: Direction) -> Option<Window> {
+    /// [D5] The window after or before the focused one in the window order, wrapping;
+    /// with `focusable`, the first such window that can take the focus.
+    fn neighbor(&self, direction: Direction, focusable: bool) -> Option<Window> {
         let len = self.order.len();
-        let index = match self.focused.and_then(|f| self.order.iter().position(|&w| w == f)) {
-            Some(i) if direction == Direction::Next => (i + 1) % len,
-            Some(i) => (i + len - 1) % len,
-            None => 0,
-        };
-        self.order.get(index).copied()
+        if len == 0 {
+            return None;
+        }
+        let start = self.focused.and_then(|f| self.order.iter().position(|&w| w == f));
+        // Without a focused window, start just outside the order.
+        let start = start.unwrap_or(if direction == Direction::Next { len - 1 } else { 0 });
+        (1..=len)
+            .map(|step| match direction {
+                Direction::Next => (start + step) % len,
+                Direction::Previous => (start + len - step) % len,
+            })
+            .map(|index| self.order[index])
+            .find(|w| !focusable || self.clients[w].hints.focusable())
     }
 
     fn run_action(&mut self, action: Action) -> Result<(), Error> {
@@ -256,52 +289,37 @@ impl Wm {
 
     /// [L3] [L4] [L5] Loads the settings; on failure the current ones stay.
     fn load(&mut self) -> Result<(), Error> {
-        let applied = match self.script.load() {
-            Ok(settings) => self.apply(&settings),
-            Err(message) => Err(message),
-        };
-        match applied {
-            Ok(()) => self.script.commit(),
+        match self.script.load().and_then(|settings| Bindings::check(&settings)) {
+            Ok(bindings) => {
+                self.install(bindings)?;
+                self.script.commit();
+                self.loaded = true;
+            }
             Err(message) => {
                 report(&message);
-                // [L3] The first load falls back to the defaults.
-                if self.key_chords.is_empty() {
-                    let defaults = Defaults.load().expect("the defaults load");
-                    if let Err(e) = self.apply(&defaults) {
-                        report(&format!("the defaults: {e}"));
-                    }
+                // [L3] Without a loaded config, the defaults apply.
+                if !self.loaded {
+                    let defaults = Bindings::check(&Settings::default());
+                    self.install(defaults.expect("the defaults are valid"))?;
                 }
             }
         }
         Ok(())
     }
 
-    /// Checks every chord, then makes `settings` current: nothing changes on an error.
-    fn apply(&mut self, settings: &Settings) -> Result<(), String> {
-        let modkey = chord::modkey(&settings.modkey)?;
-        let mut key_chords = Vec::new();
-        for binding in &settings.keys {
-            let (mods, key) = chord::key(&binding.chord, modkey)?;
-            key_chords.push((mods, key, binding.action.clone()));
-        }
-        let mut buttons = HashMap::new();
-        for binding in &settings.buttons {
-            let (mods, button) = chord::button(&binding.chord, modkey)?;
-            buttons.insert((u16::from(mods), button), binding.action.clone());
-        }
-        self.key_chords = key_chords;
-        self.buttons = buttons;
-        self.border = settings.border;
-        self.rebind().map_err(|e| e.to_string())
+    fn install(&mut self, bindings: Bindings) -> Result<(), Error> {
+        self.key_chords = bindings.keys;
+        self.buttons = bindings.buttons;
+        self.root_buttons = bindings.root_buttons;
+        self.border = bindings.border;
+        self.rebind()
     }
 
     /// Grabs every key and button chord again, and redraws every border.
     fn rebind(&mut self) -> Result<(), Error> {
-        self.grab_keys()?;
+        self.regrab()?;
         let windows: Vec<Window> = self.clients.keys().copied().collect();
         for window in windows {
-            self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
-            self.grab_buttons(window)?;
             let width = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
             self.conn.configure_window(window, &width)?;
             let color =
@@ -334,12 +352,24 @@ impl Wm {
         u16::from(state) & u16::from(mods) & !u16::from(self.keyboard.num_lock)
     }
 
-    /// [D3] [R3] Binds the key chords to the keycodes of the current mapping.
+    /// [R3] Grabs the key chords and every window's button chords again.
+    fn regrab(&mut self) -> Result<(), Error> {
+        self.grab_keys()?;
+        for &window in self.clients.keys() {
+            self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
+            self.grab_buttons(window)?;
+        }
+        Ok(())
+    }
+
+    /// [D3] [R3] Binds the key chords to the keycodes of the current mapping. [L7] A
+    /// chord another client holds is reported; the others still work.
     fn grab_keys(&mut self) -> Result<(), Error> {
         self.conn.ungrab_key(Grab::ANY, self.root, ModMask::ANY)?;
         self.keys.clear();
         let locks = self.locks();
-        for (mods, key, action) in &self.key_chords {
+        let mut grabs = Vec::new();
+        for (chord, mods, key, action) in &self.key_chords {
             let codes = match *key {
                 Key::Sym(sym) => self.keyboard.keycodes(sym),
                 Key::Code(code) => vec![code],
@@ -347,17 +377,27 @@ impl Wm {
             for code in codes {
                 for &lock in &locks {
                     let mods = *mods | lock;
-                    self.conn.grab_key(
-                        false,
-                        self.root,
-                        mods,
-                        code,
-                        GrabMode::ASYNC,
-                        GrabMode::ASYNC,
-                    )?;
+                    let (root, async_) = (self.root, GrabMode::ASYNC);
+                    let cookie = self.conn.grab_key(false, root, mods, code, async_, async_)?;
+                    grabs.push((chord, cookie));
                 }
                 self.keys.insert((u16::from(*mods), code), action.clone());
             }
+        }
+        let mut taken: Vec<&str> = Vec::new();
+        for (chord, cookie) in grabs {
+            match cookie.check() {
+                Ok(()) => {}
+                Err(ReplyError::X11Error(_)) => {
+                    if !taken.contains(&chord.as_str()) {
+                        taken.push(chord);
+                    }
+                }
+                Err(ReplyError::ConnectionError(e)) => return Err(e.into()),
+            }
+        }
+        if !taken.is_empty() {
+            report(&format!("taken by another program: {}", taken.join(", ")));
         }
         Ok(())
     }
@@ -457,8 +497,11 @@ impl Wm {
                         self.focus(e.event, false)?;
                         self.run_action(action)?;
                     }
-                    Some(action) if e.event == self.root && e.child == NONE => {
-                        self.run_action(action)?;
+                    _ if e.event == self.root && e.child == NONE => {
+                        let key = (self.clean(e.state), e.detail);
+                        if let Some(action) = self.root_buttons.get(&key).cloned() {
+                            self.run_action(action)?;
+                        }
                     }
                     // [F3] The grab is synchronous: replay the press so the window gets it.
                     _ => {
@@ -472,7 +515,7 @@ impl Wm {
             // [R3]
             Event::MappingNotify(e) if e.request != Mapping::POINTER => {
                 self.keyboard = Keyboard::read(&self.conn)?;
-                self.grab_keys()?;
+                self.regrab()?;
             }
             Event::PropertyNotify(e) => {
                 let hints: Atom = AtomEnum::WM_HINTS.into();
@@ -732,6 +775,40 @@ fn vanished<T>(reply: Result<T, ReplyError>) -> Result<Option<T>, Error> {
 
 pub(crate) fn lost(e: ReplyError) -> Error {
     Error::Connection(e.to_string())
+}
+
+/// Settings whose chords parsed: what `install` makes current.
+struct Bindings {
+    border: Border,
+    keys: Vec<(String, ModMask, Key, Action)>,
+    buttons: HashMap<(u16, u8), Action>,
+    root_buttons: HashMap<(u16, u8), Action>,
+}
+
+impl Bindings {
+    /// [L4] Parses every chord; any error fails the whole load.
+    fn check(settings: &Settings) -> Result<Bindings, String> {
+        let modkey = chord::modkey(&settings.modkey)?;
+        let mut keys = Vec::new();
+        for binding in &settings.keys {
+            let (mods, key) = chord::key(&binding.chord, modkey)?;
+            keys.push((binding.chord.clone(), mods, key, binding.action.clone()));
+        }
+        let buttons = |list: &[crate::Binding]| -> Result<_, String> {
+            let mut map = HashMap::new();
+            for binding in list {
+                let (mods, button) = chord::button(&binding.chord, modkey)?;
+                map.insert((u16::from(mods), button), binding.action.clone());
+            }
+            Ok(map)
+        };
+        Ok(Bindings {
+            border: settings.border,
+            keys,
+            buttons: buttons(&settings.buttons)?,
+            root_buttons: buttons(&settings.root_buttons)?,
+        })
+    }
 }
 
 /// Logs a config error and shows it through `notify-send`.

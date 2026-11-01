@@ -57,8 +57,12 @@ impl Drop for Xvfb {
 }
 
 /// Waits up to 3 s for `condition`, then panics with `what`.
-pub fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+pub fn eventually(what: &str, condition: impl FnMut() -> bool) {
+    eventually_within(Duration::from_secs(3), what, condition);
+}
+
+pub fn eventually_within(limit: Duration, what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + limit;
     while !condition() {
         assert!(Instant::now() < deadline, "timed out waiting for: {what}");
         thread::sleep(Duration::from_millis(10));
@@ -103,9 +107,13 @@ impl Binary {
         let dir = std::env::temp_dir().join(format!("sugoi-test-{}-{id}", std::process::id()));
         let bin = dir.join("bin");
         fs::create_dir_all(&bin).unwrap();
-        for (stub, log) in [("systemd-run", "spawn.log"), ("notify-send", "notify.log")] {
-            let script =
-                format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", dir.join(log).display());
+        // systemd-run's stub runs `sleep`, so a test can see whose child the app is.
+        let exec_sleep = "while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
+                          [ \"$2\" = sleep ] && shift && exec \"$@\"\n";
+        let stubs = [("systemd-run", "spawn.log", exec_sleep), ("notify-send", "notify.log", "")];
+        for (stub, log, tail) in stubs {
+            let log = dir.join(log);
+            let script = format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n{tail}", log.display());
             let path = bin.join(stub);
             fs::write(&path, script).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -130,6 +138,10 @@ impl Binary {
     pub fn log(&self, name: &str) -> Vec<String> {
         let text = fs::read_to_string(self.dir.join(name)).unwrap_or_default();
         text.lines().map(str::to_owned).collect()
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     pub fn status(&mut self) -> Option<ExitStatus> {
@@ -194,6 +206,13 @@ impl Session {
     /// The sugoi binary without a config file.
     pub fn without_config() -> Session {
         Session::with_binary(None)
+    }
+
+    /// The sugoi binary running `config`, without waiting for it to be ready.
+    pub fn starting(config: &str) -> Session {
+        let mut session = Session::without_wm();
+        session.binary = Some(Binary::start(&session.x.display, Some(config)));
+        session
     }
 
     fn with_binary(config: Option<&str>) -> Session {

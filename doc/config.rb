@@ -30,4 +30,4 @@ key("Mod-p") { spawn "rofi", "-show", "drun" }
 key("Mod-y") { sh "bash -ic 'overmind restart -s ~/cg/reservotron/.overmind.sock'" }
 
 # The root window's menu
-button("3") { spawn "rofi", "-show", "drun" }
+root_button("3") { spawn "rofi", "-show", "drun" }

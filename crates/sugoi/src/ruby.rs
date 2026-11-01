@@ -1,7 +1,7 @@
 //! The Ruby config ([L1], [L2]): CRuby embedded through magnus. Ruby must run on the
 //! thread that started it, so this is only for the binary; tests drive it through it.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use magnus::prelude::*;
 use magnus::{ArgList, RModule, RString, Ruby, TryConvert, Value};
@@ -12,19 +12,15 @@ pub struct RubyScript {
     path: PathBuf,
 }
 
-/// What `Sugoi.load` exports: border width and colors, modkey, keys, buttons.
-type Exported =
-    (Option<u16>, Option<u32>, Option<u32>, String, Vec<(String, usize)>, Vec<(String, usize)>);
+type Chords = Vec<(String, usize)>;
+/// What `Sugoi.load` exports: border width and colors, modkey, keys, buttons, root buttons.
+type Exported = (Option<u16>, Option<u32>, Option<u32>, String, Chords, Chords, Chords);
 
 impl RubyScript {
     /// Loads the DSL into the Ruby `ruby` proves is running on this thread.
     pub fn new(ruby: &Ruby, path: PathBuf) -> Result<RubyScript, String> {
         ruby.eval::<Value>(include_str!("../ruby/prelude.rb")).map_err(|e| e.to_string())?;
         Ok(RubyScript { path })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Calls the `Sugoi` module function `method`.
@@ -47,7 +43,7 @@ impl Script for RubyScript {
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
-        let (width, focused, normal, modkey, keys, buttons) =
+        let (width, focused, normal, modkey, keys, buttons, root_buttons) =
             Exported::try_convert(value).map_err(|e| e.to_string())?;
         let defaults = Border::default();
         let bind = |list: Vec<(String, usize)>| {
@@ -64,6 +60,7 @@ impl Script for RubyScript {
             modkey,
             keys: bind(keys),
             buttons: bind(buttons),
+            root_buttons: bind(root_buttons),
         })
     }
 

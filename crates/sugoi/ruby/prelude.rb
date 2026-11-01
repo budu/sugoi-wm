@@ -3,9 +3,14 @@
 
 require "timeout"
 
+# [C3] sugoi handles these signals itself; Ruby's own handlers would only queue them.
+%w[TERM INT HUP].each { |signal| trap(signal, "SYSTEM_DEFAULT") }
+
 module Sugoi
   # [R2] Seconds a block may run.
   TIME_LIMIT = 1.0
+  # [L6] Seconds a config file may take to load.
+  LOAD_LIMIT = 5.0
 
   # [D5] Actions queue commands; sugoi runs them once the block returns.
   module Actions
@@ -37,6 +42,7 @@ module Sugoi
       @modkey = "Mod4"
       @keys = {}
       @buttons = {}
+      @root_buttons = {}
       @blocks = []
     end
 
@@ -56,9 +62,13 @@ module Sugoi
     # [D4]
     def button(chord, &block) = @buttons[String(chord)] = register(chord, block)
 
-    # What sugoi reads: [width, focused, normal, modkey, keys, buttons].
+    # [D6]
+    def root_button(chord, &block) = @root_buttons[String(chord)] = register(chord, block)
+
+    # What sugoi reads: [width, focused, normal, modkey, keys, buttons, root buttons].
     def export
-      [@border[:width], @border[:focused], @border[:normal], @modkey, @keys.to_a, @buttons.to_a]
+      [@border[:width], @border[:focused], @border[:normal], @modkey,
+       @keys.to_a, @buttons.to_a, @root_buttons.to_a]
     end
 
     private
@@ -76,7 +86,7 @@ module Sugoi
     def load(path)
       @path = path
       config = Config.new
-      config.instance_eval(File.read(path), path, 1)
+      Timeout.timeout(LOAD_LIMIT) { config.instance_eval(File.read(path), path, 1) }
       @candidate = config
       config.export
     rescue ScriptError, StandardError => e
