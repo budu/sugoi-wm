@@ -33,7 +33,8 @@ impl Wm {
                 0,
                 1024,
             )?,
-            name: get(AtomEnum::WM_NAME.into(), AtomEnum::STRING)?,
+            // Any type: STRING is Latin-1, but some clients write UTF8_STRING here.
+            name: get(AtomEnum::WM_NAME.into(), AtomEnum::ANY)?,
             kind: get(a._NET_WM_WINDOW_TYPE, AtomEnum::ATOM)?,
             transient: get(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)?,
         })
@@ -52,7 +53,7 @@ impl Wm {
             _ => (String::new(), String::new()),
         };
         let net_name = text(vanished(cookies.net_name.reply())?);
-        let name = text(vanished(cookies.name.reply())?);
+        let name = vanished(cookies.name.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
         let types: Vec<Atom> = vanished(cookies.kind.reply())?
             .and_then(|r| r.value32().map(|v| v.collect()))
             .unwrap_or_default();
@@ -64,6 +65,27 @@ impl Wm {
             kind: types.iter().find_map(|&t| self.window_type(t)),
             transient,
         })
+    }
+
+    /// A text property: Latin-1 when its type is `STRING`, else UTF-8.
+    fn decode(&self, reply: &GetPropertyReply) -> String {
+        let string: Atom = AtomEnum::STRING.into();
+        if reply.type_ == string {
+            reply.value.iter().map(|&b| char::from(b)).collect()
+        } else {
+            String::from_utf8_lossy(&reply.value).into_owned()
+        }
+    }
+
+    /// [U1] The title alone, for a title change.
+    pub(super) fn read_title(&self, window: Window) -> Result<String, Error> {
+        let a = &self.atoms;
+        let net = self.conn.get_property(false, window, a._NET_WM_NAME, a.UTF8_STRING, 0, 1024)?;
+        let any: Atom = AtomEnum::ANY.into();
+        let name = self.conn.get_property(false, window, AtomEnum::WM_NAME, any, 0, 1024)?;
+        let net = vanished(net.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
+        let name = vanished(name.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
+        Ok(if net.is_empty() { name } else { net })
     }
 
     fn window_type(&self, atom: Atom) -> Option<WindowType> {
@@ -79,11 +101,13 @@ impl Wm {
         })
     }
 
-    /// [U2] to [U5] Applies every matching rule to `window`; `keep_workspace` for a
-    /// window adopted on the workspace its `_NET_WM_DESKTOP` names ([U6]).
+    /// [U2] to [U5] Applies every matching rule to `window`; `adopted` for a window
+    /// adopted at startup, which keeps its geometry, and `keep_workspace` for one on the
+    /// workspace its `_NET_WM_DESKTOP` names ([U6]).
     pub(super) fn apply_rules(
         &mut self,
         window: Window,
+        adopted: bool,
         keep_workspace: bool,
     ) -> Result<(), Error> {
         let info = &self.clients[&window].info;
@@ -97,12 +121,17 @@ impl Wm {
         if let Some(float) = effects.float {
             client.floating = float;
         }
-        if let Some((width, height)) = effects.size {
-            client.rect.width = width + border;
-            client.rect.height = height + border;
-        }
-        if effects.center {
-            client.rect = layout::center(screen, client.rect);
+        // [U6] An adopted window keeps the geometry it had: only new ones are placed.
+        if !adopted {
+            if let Some((width, height)) = effects.size {
+                client.rect.width = width + border;
+                client.rect.height = height + border;
+            }
+            if effects.center {
+                client.rect = layout::center(screen, client.rect);
+            }
+            // [W2]
+            client.rect = layout::on_screen(screen, client.rect);
         }
         if let Some(on_top) = effects.on_top {
             client.on_top = on_top;
@@ -129,16 +158,50 @@ impl Wm {
         }
     }
 
+    fn resize_rect(&mut self, window: Window, width: u32, height: u32) {
+        let (screen, border) = (self.screen, 2 * u32::from(self.border.width));
+        let client = self.clients.get_mut(&window).expect("managed");
+        client.rect.width = width + border;
+        client.rect.height = height + border;
+        client.rect = layout::on_screen(screen, client.rect);
+    }
+
+    fn center_rect(&mut self, window: Window) {
+        let screen = self.screen;
+        let client = self.clients.get_mut(&window).expect("managed");
+        client.rect = layout::center(screen, client.rect);
+    }
+
     /// Whether `window`'s workspace tiles: in the float layout every window floats.
     fn tiled_layout(&self, window: Window) -> bool {
         self.desks[self.clients[&window].workspace].layout != layout::Layout::Float
     }
 
     /// [H1] [H4] Runs the hooks for `event`; nothing the hooks' actions cause runs any.
+    /// Manage hooks run at once, before the window shows; the others once the event that
+    /// raised them is handled, from the event loop, so no grab is held while Ruby runs and
+    /// a switch or a close is complete when its hook sees it.
     pub(super) fn run_hooks(&mut self, event: Event, arg: HookArg) -> Result<(), Error> {
         if self.in_hook {
             return Ok(());
         }
+        if event != Event::Manage {
+            if self.hooks.iter().any(|(e, _)| *e == event) {
+                self.later_hooks.push_back((event, arg));
+            }
+            return Ok(());
+        }
+        self.run_hooks_now(event, arg)
+    }
+
+    /// Runs the hooks deferred by `run_hooks`.
+    pub(super) fn run_later_hooks(&mut self) -> Result<bool, Error> {
+        let Some((event, arg)) = self.later_hooks.pop_front() else { return Ok(false) };
+        self.run_hooks_now(event, arg)?;
+        Ok(true)
+    }
+
+    fn run_hooks_now(&mut self, event: Event, arg: HookArg) -> Result<(), Error> {
         let blocks: Vec<usize> =
             self.hooks.iter().filter(|(e, _)| *e == event).map(|&(_, b)| b).collect();
         if blocks.is_empty() {
@@ -146,8 +209,13 @@ impl Wm {
         }
         let windows: Vec<Snapshot> = self.order.iter().map(|&w| self.snapshot(w)).collect();
         self.in_hook = true;
+        let loads = self.loads;
         let mut result = Ok(());
         for block in blocks {
+            // A hook's `reload` replaced the blocks: the indices left are stale.
+            if self.loads != loads {
+                break;
+            }
             match self.script.hook(block, &arg, &windows) {
                 Ok(commands) => {
                     for command in commands {
@@ -184,16 +252,14 @@ impl Wm {
             WindowCommand::Float(false) => {
                 self.clients.get_mut(&window).expect("managed").floating = false;
             }
+            // [W7] Like `center`, they float a tiled window.
             WindowCommand::Size(width, height) => {
-                let border = 2 * u32::from(self.border.width);
-                let client = self.clients.get_mut(&window).expect("managed");
-                client.rect.width = width + border;
-                client.rect.height = height + border;
+                self.float(window);
+                self.resize_rect(window, width, height);
             }
             WindowCommand::Center => {
-                let screen = self.screen;
-                let client = self.clients.get_mut(&window).expect("managed");
-                client.rect = layout::center(screen, client.rect);
+                self.float(window);
+                self.center_rect(window);
             }
             WindowCommand::Master => {
                 self.order.retain(|&w| w != window);

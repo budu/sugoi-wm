@@ -661,3 +661,69 @@ fn u2_an_unknown_rule_option_fails_the_load() {
     let notes = notifications(&mut session);
     assert!(notes[0].contains("unknown rule option :klass"), "{notes:?}");
 }
+
+/// [H1] The workspace hook runs after the switch, focus included.
+#[test]
+fn h1_the_workspace_hook_sees_the_new_workspaces_focus() {
+    let session = Session::with_config(
+        "key(\"Mod-x\") { workspace 2 }\nkey(\"Mod-z\") { workspace 1 }\n\
+         on(:workspace) { |n| close if n == 1 }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, X]);
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.keys(&[SUPER, Z]);
+    eventually("a closed", || !session.exists(a.window));
+    assert!(session.exists(b.window));
+}
+
+/// [H4] A hook's reload stops the event's other hooks, whose blocks it replaced.
+#[test]
+fn h4_a_reload_in_a_hook_runs_no_stale_block() {
+    let mut session =
+        Session::with_config("on(:focus) { reload }\non(:focus) { spawn \"second\" }\n");
+    eventually("marker done", || {
+        session.focus() == POINTER_ROOT || !spawns(&mut session).is_empty()
+    });
+    settle();
+    let before = spawns(&mut session).len();
+    rewrite(&mut session, "key(\"Mod-y\") { spawn \"y\" }\nkey(\"Mod-x\") { spawn \"stale\" }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 100));
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    settle();
+    assert_eq!(spawns(&mut session).len(), before, "{:?}", spawns(&mut session));
+}
+
+/// [H2] and [W7]
+#[test]
+fn h2_window_center_floats_a_tiled_window() {
+    let session = Session::with_config("on(:manage) { |w| w.size 300, 200; w.center }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 100));
+    app.map();
+    eventually("floating, centered", || session.outer(app.window) == (487, 297, 306, 206));
+}
+
+/// [U6] A restart keeps a ruled window where the user put it.
+#[test]
+fn u6_an_adopted_window_keeps_its_geometry() {
+    let session = Session::with_config(
+        "rule class: \"feh\", float: true, size: [300, 200], center: true\n\
+         key(\"Mod-x\") { restart }\n",
+    );
+    let feh = session.app(AppSpec::at(0, 0, 100, 100).class("feh", "feh"));
+    feh.map();
+    eventually("centered", || session.outer(feh.window) == (487, 297, 306, 206));
+    let request = ConfigureWindowAux::new().x(10).y(20);
+    feh.conn.configure_window(feh.window, &request).unwrap();
+    feh.conn.flush().unwrap();
+    eventually("moved", || session.outer(feh.window) == (10, 20, 306, 206));
+    session.keys(&[SUPER, X]);
+    // The restart gives the window its own border back for a moment, then sugoi's.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    eventually("kept", || session.outer(feh.window) == (10, 20, 306, 206));
+}

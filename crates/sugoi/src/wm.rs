@@ -134,6 +134,10 @@ pub struct Wm {
     hooks: Vec<(HookEvent, usize)>,
     /// [H4] Whether a hook's actions are running.
     in_hook: bool,
+    /// [H1] Hooks to run once the current event is handled.
+    later_hooks: VecDeque<(HookEvent, HookArg)>,
+    /// How many configs have loaded, so a hook's `reload` stops its event's hooks.
+    loads: u64,
     /// [Y7]
     layouts: Vec<Layout>,
     /// [V3] Each workspace's layout and master column.
@@ -233,6 +237,8 @@ impl Wm {
             rules: Rule::defaults(),
             hooks: Vec::new(),
             in_hook: false,
+            later_hooks: VecDeque::new(),
+            loads: 0,
             layouts: vec![Layout::Tile],
             desks: vec![
                 Desk { layout: Layout::Tile, master: Master::default() };
@@ -293,6 +299,9 @@ impl Wm {
                 }
             }
             self.conn.flush()?;
+            if self.run_later_hooks()? {
+                continue;
+            }
             if let Some(event) = self.pending.pop_front() {
                 self.handle_event(event)?;
                 continue;
@@ -441,6 +450,8 @@ impl Wm {
         self.layouts = bindings.layouts;
         self.rules = Rule::defaults().into_iter().chain(bindings.rules).collect();
         self.hooks = bindings.hooks;
+        self.loads += 1;
+        self.later_hooks.clear();
         self.regrab(true)?;
         // [L5] Place every window again, with the new border.
         for client in self.clients.values_mut() {
@@ -691,7 +702,13 @@ impl Wm {
                     {
                         client.hints = hints;
                     }
-                } else if e.atom == class || e.atom == name || e.atom == self.atoms._NET_WM_NAME {
+                } else if e.atom == name || e.atom == self.atoms._NET_WM_NAME {
+                    // Titles change often: only the title is read again.
+                    let title = self.read_title(e.window)?;
+                    if let Some(client) = self.clients.get_mut(&e.window) {
+                        client.info.title = title;
+                    }
+                } else if e.atom == class {
                     let cookies = self.request_info(e.window)?;
                     let info = self.read_info(cookies)?;
                     let client = self.clients.get_mut(&e.window).expect("managed");
@@ -700,7 +717,7 @@ impl Wm {
                     client.info = info;
                     // [U6] Some apps set WM_CLASS only after mapping.
                     if reclassed {
-                        self.apply_rules(e.window, false)?;
+                        self.apply_rules(e.window, false, false)?;
                         self.arrange()?;
                         self.show(e.window)?;
                         if !self.visible(e.window) {
@@ -813,7 +830,7 @@ impl Wm {
         self.history.push(window);
         self.stack.push(window);
         // [U6] [U7] Rules before the window shows; the manage hooks for new windows.
-        self.apply_rules(window, kept.is_some())?;
+        self.apply_rules(window, !map, kept.is_some())?;
         if map {
             let snapshot = self.snapshot(window);
             self.run_hooks(HookEvent::Manage, HookArg::Window(snapshot))?;
@@ -827,10 +844,8 @@ impl Wm {
             if !self.visible(window) {
                 self.set_state(window, desks::ICONIC_STATE)?;
             }
-            // [F1], unless the window went to another workspace ([U7]).
-            if self.visible(window) {
-                self.focus(window, true)?;
-            }
+            // [F1]; `focus` refuses a window another workspace hides ([U7]).
+            self.focus(window, true)?;
         }
         Ok(())
     }
@@ -838,9 +853,12 @@ impl Wm {
     /// [M4]
     fn unmanage(&mut self, window: Window, destroyed: bool) -> Result<(), Error> {
         debug!("unmanage {window:#x}");
-        let Some(client) = self.clients.remove(&window) else {
+        if !self.clients.contains_key(&window) {
             return Ok(());
-        };
+        }
+        // [H1] The window as it was, as every other hook sees windows.
+        let gone = self.snapshot(window);
+        let client = self.clients.remove(&window).expect("managed");
         for list in [&mut self.history, &mut self.order, &mut self.stack, &mut self.minimized] {
             list.retain(|&w| w != window);
         }
@@ -860,13 +878,6 @@ impl Wm {
         self.stacked.retain(|&w| w != window);
         self.arrange()?;
         self.refocus(window)?;
-        // [H1] The window as it was.
-        let gone = crate::Snapshot {
-            id: window,
-            info: client.info,
-            workspace: client.workspace as u32 + 1,
-            floating: client.floating,
-        };
         self.run_hooks(HookEvent::Unmanage, HookArg::Window(gone))
     }
 

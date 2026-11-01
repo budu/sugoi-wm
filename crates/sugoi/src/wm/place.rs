@@ -278,10 +278,8 @@ impl Wm {
         self.clients.get_mut(&window).expect("minimized windows are managed").minimized = false;
         self.arrange()?;
         self.show(window)?;
-        if self.visible(window) {
-            self.focus(window, true)?;
-        }
-        Ok(())
+        // `focus` refuses a window on another workspace.
+        self.focus(window, true)
     }
 
     /// After a failed restart: gives the windows sugoi's borders back, and hides again
