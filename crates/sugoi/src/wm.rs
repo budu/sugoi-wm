@@ -451,10 +451,10 @@ impl Wm {
                 let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
                 let managed = self.clients.contains_key(&e.event);
                 match action {
-                    // [D4] Focus the window, consume the press, run the block.
+                    // [D4] The chord's grab is asynchronous, so the press never reaches
+                    // the window.
                     Some(action) if managed => {
                         self.focus(e.event, false)?;
-                        self.conn.allow_events(Allow::ASYNC_POINTER, e.time)?;
                         self.run_action(action)?;
                     }
                     Some(action) if e.event == self.root && e.child == NONE => {

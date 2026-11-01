@@ -366,3 +366,13 @@ fn r4_chords_match_with_num_lock_on() {
     session.keys(&[SUPER, X]);
     eventually("spawned", || spawns(&mut session) == [spawned("x", "x")]);
 }
+
+/// [L2] The ported awesome config in `doc/config.rb` loads without an error.
+#[test]
+fn l2_the_example_config_loads() {
+    let example = include_str!("../../../doc/config.rb");
+    let mut session = Session::with_config(example);
+    session.keys(&[SUPER, RETURN]);
+    eventually("kitty", || spawns(&mut session) == [spawned("kitty", "/usr/bin/kitty")]);
+    assert!(notifications(&mut session).is_empty());
+}

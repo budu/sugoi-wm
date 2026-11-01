@@ -30,6 +30,25 @@ each section.
 
 ## Configuration
 
+- **The pacman Ruby, dynamically linked** (M2). `.cargo/config.toml` sets `RUBY` to
+  `/usr/bin/ruby` (3.4.10), since asdf's 4.0.1 comes first on `PATH` in a shell but
+  lives in the home directory and may not be on `PATH` when X starts. Arch ships no
+  `libruby-static.a`, so a Ruby major upgrade needs a rebuild of sugoi.
+- **The binary owns Ruby** (M2). CRuby starts once per process, on one thread, so the
+  library takes a `Script` and the binary passes `RubyScript`; the in-process tests use
+  the built-in `Defaults`, and the config cases run the binary.
+- **Ruby keeps the config objects** (M2). magnus 0.9 has no boxed GC root, so
+  `Sugoi.load` keeps the candidate, `Sugoi.commit` makes it current once sugoi has
+  checked its chords, and Rust holds only block indices.
+- **Actions queue commands** (M2). A block's actions append to a list that sugoi runs
+  after the block returns, so Ruby never calls into the WM, and a failed block runs
+  none of them ([R1]).
+- **`Timeout` for the 1 s limit** (M2). Measured at 7 µs per guarded call; it stops a
+  pure-Ruby loop at the next 100 ms tick (0.3 s for a 0.2 s limit).
+- **Key names from libxkbcommon** (M2). `xkb_keysym_from_name` knows every name `xev`
+  prints; `xkeysym` has no lookup by name.
+- **Syntax errors on one line** (M2). Ruby 3.4's Prism prints the source under the
+  error; sugoi keeps the location and the messages for the notification.
 - **CRuby, embedded** (user, 2026-10-31). Full Ruby and gems through `magnus`, rather
   than mruby: the config is personal, so sandboxing matters less than the language and
   the bindings. The cost is a build tied to one libruby (0.1 plan, Risks).
@@ -62,5 +81,10 @@ each section.
 
 ## Spawning
 
+- **Apps are reaped in a thread** (M2). `systemd-run --scope` runs the app as sugoi's
+  child; a thread per app waits for it. `SIGCHLD` ignored would break Ruby's
+  `Process.wait` in configs, and Ruby threads cannot reap while sugoi waits in `poll`.
+- **Scope names keep letters, digits and `_`** (M2). A `-` would nest the slice
+  (`app-zed-editor.slice` under `app-zed.slice`).
 - **No workspace freezing** (user, 2026-10-31). Freezing hidden apps' cgroups stops
   background work and breaks network connections.
