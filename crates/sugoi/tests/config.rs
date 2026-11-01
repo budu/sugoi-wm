@@ -746,3 +746,39 @@ fn h1_a_reload_keeps_queued_hooks() {
     session.keys(&[SUPER, X]);
     eventually("workspace hook", || spawns(&mut session) == [spawned("ws", "ws 2")]);
 }
+
+/// [A1]
+#[test]
+fn a1_spawn_limits_go_to_the_scope() {
+    let mut session = Session::with_config(
+        "key(\"Mod-x\") { spawn \"firefox\", memory: \"4G\", cpu_weight: 50 }\n",
+    );
+    session.keys(&[SUPER, X]);
+    let expected = "--user --scope --collect --quiet --slice=app-firefox.slice \
+                    -p MemoryMax=4G -p CPUWeight=50 -- firefox";
+    eventually("spawned", || spawns(&mut session) == [expected]);
+}
+
+/// [A1] and [R1]
+#[test]
+fn a1_a_bad_limit_fails_the_block() {
+    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"x\", memory: \"lots\" }\n");
+    session.keys(&[SUPER, X]);
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("memory must be bytes or a number with K, M, G or T"), "{notes:?}");
+    assert!(spawns(&mut session).is_empty());
+}
+
+/// [A5]
+#[test]
+fn a5_hooks_see_the_windows_process_and_unit() {
+    let Some(scope) = Scope::start("app-sugoitest.slice") else { return };
+    let mut session =
+        Session::with_config("on(:manage) { |w| spawn \"seen\", w.pid.inspect, w.unit.inspect }\n");
+    let spec = AppSpec { process: Some((scope.pid(), host())), ..AppSpec::at(0, 0, 200, 100) };
+    let app = session.app(spec);
+    app.map();
+    let expected = spawned("seen", &format!("seen {} \"{}\"", scope.pid(), scope.unit));
+    eventually("hook", || spawns(&mut session).contains(&expected));
+}

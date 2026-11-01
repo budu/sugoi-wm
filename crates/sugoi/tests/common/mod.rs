@@ -443,6 +443,8 @@ pub struct AppSpec {
     pub title: Option<&'static str>,
     pub kind: Option<&'static str>,
     pub transient_for: Option<Window>,
+    /// [A2] `_NET_WM_PID` and `WM_CLIENT_MACHINE`.
+    pub process: Option<(u32, String)>,
 }
 
 impl AppSpec {
@@ -461,6 +463,7 @@ impl AppSpec {
             title: None,
             kind: None,
             transient_for: None,
+            process: None,
         }
     }
 
@@ -546,6 +549,25 @@ impl App {
             )
             .unwrap();
         }
+        if let Some((pid, machine)) = &spec.process {
+            let pid_atom = atom(&conn, "_NET_WM_PID");
+            conn.change_property32(
+                PropMode::REPLACE,
+                window,
+                pid_atom,
+                AtomEnum::CARDINAL,
+                &[*pid],
+            )
+            .unwrap();
+            conn.change_property8(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_CLIENT_MACHINE,
+                AtomEnum::STRING,
+                machine.as_bytes(),
+            )
+            .unwrap();
+        }
         if let Some(input) = spec.input {
             // WM_HINTS with only the input flag set.
             let hints = [1, u32::from(input), 0, 0, 0, 0, 0, 0, 0];
@@ -599,6 +621,60 @@ impl App {
             matches!(e, Event::ClientMessage(m)
                 if m.type_ == protocols && m.data.as_data32()[0] == wanted)
         });
+    }
+}
+
+/// This host's name, as sugoi compares it with `WM_CLIENT_MACHINE`.
+pub fn host() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim().to_owned()
+}
+
+/// A real systemd scope running `sleep 30`, for the cases about units ([A3], [A4]); `None`
+/// without a user manager. `slice` decides whether `kill` may stop it.
+pub struct Scope {
+    pub child: Child,
+    pub unit: String,
+}
+
+impl Scope {
+    pub fn start(slice: &str) -> Option<Scope> {
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+        let running = Process::new("systemctl").args(["--user", "is-system-running"]).output();
+        let state = String::from_utf8(running.ok()?.stdout).ok()?;
+        if !matches!(state.trim(), "running" | "degraded") {
+            return None;
+        }
+        let n = COUNT.fetch_add(1, Ordering::Relaxed);
+        let unit = format!("sugoi-test-{}-{n}.scope", std::process::id());
+        // The absolute path, past the binary cases' stub.
+        let child = Process::new("/usr/bin/systemd-run")
+            .args(["--user", "--scope", "--collect", "--quiet"])
+            .arg(format!("--unit={unit}"))
+            .arg(format!("--slice={slice}"))
+            .args(["--", "sleep", "30"])
+            .spawn()
+            .ok()?;
+        // systemd-run becomes the app: wait until it is sleep, in its scope.
+        let comm = format!("/proc/{}/comm", child.id());
+        eventually("scope started", || {
+            std::fs::read_to_string(&comm).is_ok_and(|c| c.trim() == "sleep")
+        });
+        Some(Scope { child, unit })
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    pub fn running(&mut self) -> bool {
+        self.child.try_wait().unwrap().is_none()
+    }
+}
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        let _ = Process::new("systemctl").args(["--user", "stop", &self.unit]).status();
+        let _ = self.child.wait();
     }
 }
 
