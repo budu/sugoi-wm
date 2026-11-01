@@ -304,7 +304,11 @@ impl Session {
         let marker = self.app(AppSpec::at(1100, 700, 20, 20));
         marker.map();
         eventually("marker managed", || self.wm_state(marker.window).is_some());
-        // Closing the marker's connection destroys it; sugoi unmanages it next.
+        // Closing the marker's connection destroys it; wait for that, since in a tiling
+        // layout the marker covers the screen.
+        let window = marker.window;
+        drop(marker);
+        eventually("marker gone", || !self.exists(window));
     }
 
     pub fn focus(&self) -> Window {

@@ -586,10 +586,9 @@ impl Wm {
                 }
             }
             Event::ButtonPress(e) => {
-                let hit = self.clients.contains_key(&e.event).then_some(e.event);
-                self.press = Some((e.root_x, e.root_y, hit));
-                let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
                 let managed = self.clients.contains_key(&e.event);
+                self.press = Some((e.root_x, e.root_y, managed.then_some(e.event)));
+                let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
                 match action {
                     // [D4] The chord's grab is asynchronous, so the press never reaches
                     // the window.
@@ -611,6 +610,8 @@ impl Wm {
                         self.conn.allow_events(Allow::REPLAY_POINTER, e.time)?;
                     }
                 }
+                // [G1] Only this press's actions may start a drag from it.
+                self.press = None;
             }
             // [R3]
             Event::MappingNotify(e) if e.request != Mapping::POINTER => {
@@ -938,7 +939,8 @@ impl Bindings {
         }
         let width = settings.master.width;
         if !(crate::layout::MIN_FACTOR..=crate::layout::MAX_FACTOR).contains(&width) {
-            return Err(format!("master width must be between 0.05 and 0.95, not {width}"));
+            let (least, most) = (crate::layout::MIN_FACTOR, crate::layout::MAX_FACTOR);
+            return Err(format!("master width must be between {least} and {most}, not {width}"));
         }
         Ok(Bindings {
             border: settings.border,

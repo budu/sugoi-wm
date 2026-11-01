@@ -59,7 +59,13 @@ impl Wm {
         let tiled = self.tiled_windows();
         let cells = match self.layout {
             Layout::Tile if !tiled.is_empty() => {
-                let shares: Vec<f32> = tiled[1..].iter().map(|w| self.clients[w].share).collect();
+                // [Y3] Windows come and go from the stack: keep its weights balanced.
+                let mut shares: Vec<f32> =
+                    tiled[1..].iter().map(|w| self.clients[w].share).collect();
+                layout::balance(&mut shares);
+                for (window, &share) in tiled[1..].iter().zip(&shares) {
+                    self.clients.get_mut(window).expect("tiled windows are managed").share = share;
+                }
                 layout::tile(self.screen, self.master, &shares)
             }
             Layout::Max => vec![self.screen; tiled.len()],
@@ -199,10 +205,13 @@ impl Wm {
     }
 
     /// Takes a tiled window out of the layout where it is ([W1], [W7], [G1]).
+    /// A tiled, maximized or fullscreen window floats where it shows ([W7], [G1]).
     fn float(&mut self, window: Window) {
-        if self.tiled(window) {
-            let rect = self.placed(window);
-            let client = self.clients.get_mut(&window).expect("managed");
+        let tiled = self.tiled(window);
+        let rect = self.placed(window);
+        let client = self.clients.get_mut(&window).expect("managed");
+        if tiled || client.maximized || client.fullscreen {
+            (client.maximized, client.fullscreen) = (false, false);
             client.floating = true;
             client.rect = rect;
         }
@@ -214,7 +223,7 @@ impl Wm {
         if state == State::Floating {
             if self.tiled(window) {
                 self.float(window);
-            } else {
+            } else if self.clients[&window].floating {
                 self.clients.get_mut(&window).expect("managed").floating = false;
             }
             return self.arrange();
@@ -296,33 +305,13 @@ impl Wm {
     }
 
     /// [G1] [G2] Starts dragging the window the last button press hit.
+    /// The press is the one being handled: a `move` from a key binding finds none.
     pub(super) fn start_drag(&mut self, resize: bool) -> Result<(), Error> {
-        let Some((x, y, Some(window))) = self.press else { return Ok(()) };
-        if !self.clients.contains_key(&window) {
+        let Some((x, y, Some(window))) = self.press.take() else { return Ok(()) };
+        if !self.clients.get(&window).is_some_and(|c| !c.minimized) {
             return Ok(());
         }
-        // A maximized or fullscreen window is dragged from where it shows.
-        let placed = self.placed(window);
-        let client = self.clients.get_mut(&window).expect("managed");
-        if client.maximized || client.fullscreen {
-            (client.maximized, client.fullscreen) = (false, false);
-            client.floating = true;
-            client.rect = placed;
-        }
-        self.float(window);
-        self.arrange()?;
-        self.raise(window)?;
-        let rect = self.clients[&window].rect;
-        let pointer = if resize {
-            // The corner, kept on screen, where X would clamp the warp anyway.
-            let right = (rect.x + rect.width as i32 - 1).min(self.screen.width as i32 - 1);
-            let bottom = (rect.y + rect.height as i32 - 1).min(self.screen.height as i32 - 1);
-            let corner = (right.max(0) as i16, bottom.max(0) as i16);
-            self.conn.warp_pointer(NONE, self.root, 0, 0, 0, 0, corner.0, corner.1)?;
-            corner
-        } else {
-            (x, y)
-        };
+        // Grab first: if another client holds the pointer, nothing changes.
         let mask = EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE;
         let (root, async_) = (self.root, GrabMode::ASYNC);
         let grab =
@@ -330,6 +319,23 @@ impl Wm {
         if grab?.reply().map_err(lost)?.status != GrabStatus::SUCCESS {
             return Ok(());
         }
+        self.float(window);
+        self.arrange()?;
+        self.raise(window)?;
+        let rect = self.clients[&window].rect;
+        let pointer = if resize {
+            // The corner, kept on screen, where X would clamp the warp anyway.
+            let screen = self.screen;
+            let right = rect.x + rect.width as i32 - 1;
+            let bottom = rect.y + rect.height as i32 - 1;
+            let right = right.min(screen.x + screen.width as i32 - 1).max(screen.x);
+            let bottom = bottom.min(screen.y + screen.height as i32 - 1).max(screen.y);
+            let corner = (right as i16, bottom as i16);
+            self.conn.warp_pointer(NONE, self.root, 0, 0, 0, 0, corner.0, corner.1)?;
+            corner
+        } else {
+            (x, y)
+        };
         self.drag = Some(Drag { window, resize, pointer, rect });
         Ok(())
     }
@@ -348,10 +354,15 @@ impl Wm {
             rect.y += dy;
         }
         let window = drag.window;
-        let Some(client) = self.clients.get_mut(&window) else {
+        // A key may have changed the window's state during the drag: it wins.
+        let floating = self
+            .clients
+            .get(&window)
+            .is_some_and(|c| !self.tiled(window) && !(c.maximized || c.fullscreen || c.minimized));
+        if !floating {
             return self.end_drag();
-        };
-        client.rect = rect;
+        }
+        self.clients.get_mut(&window).expect("managed").rect = rect;
         // Only the dragged window moves: no arrange, no round trip per motion.
         self.place(window, rect, self.border.width)?;
         Ok(())

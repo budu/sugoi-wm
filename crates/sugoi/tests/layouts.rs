@@ -430,3 +430,47 @@ fn y9_a_floating_request_for_the_same_geometry_gets_a_reply() {
     app.conn.flush().unwrap();
     app.expect_event("a ConfigureNotify", |e| matches!(e, Event::ConfigureNotify(_)));
 }
+
+/// [G1]
+#[test]
+fn g1_a_move_without_a_press_drags_nothing() {
+    let keys = vec![Binding::commands("Mod-x", vec![Command::Move])];
+    let session = Session::with_settings(Settings { keys, ..floating() });
+    // a takes its clicks, as apps do, so the replayed press stops there.
+    let events = EventMask::BUTTON_PRESS;
+    let a = session.app(AppSpec { events, ..AppSpec::at(0, 0, 200, 100) });
+    let b = session.app(AppSpec::at(400, 0, 200, 100));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.click(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, common::keycode::X]);
+    // Time for a grab, were the move to start one.
+    settle();
+    session.move_pointer(300, 300);
+    settle();
+    assert_eq!(session.outer(a.window), (0, 0, 206, 106));
+}
+
+/// [Y3]
+#[test]
+fn y3_after_a_swap_new_windows_still_get_an_average_share() {
+    let session = tiling();
+    let apps = map(&session, 3);
+    send(&session, Command::Focus(sugoi::Direction::Previous));
+    eventually("b focused", || session.focus() == apps[1].window);
+    for _ in 0..20 {
+        send(&session, Command::WindowHeight(0.05));
+    }
+    eventually("b at most", || session.outer(apps[1].window).3 == 760);
+    // b becomes the master; the stack is the old master and c.
+    send(&session, Command::Swap(sugoi::Direction::Previous));
+    eventually("b master", || session.outer(apps[1].window) == (640, 0, 640, 800));
+    let d = session.app(AppSpec::at(0, 0, 200, 100));
+    d.map();
+    eventually("d a third", || session.outer(d.window).3 >= 160);
+    for app in [&apps[0], &apps[2]] {
+        assert!(session.outer(app.window).3 >= 40, "{:?}", session.outer(app.window));
+    }
+}
