@@ -68,6 +68,24 @@ each section.
 
 ## Layouts
 
+- **Crossings from sugoi's own moves are dropped** (M3). After an arrange or restack that
+  moved something, a round trip, then every queued `EnterNotify` is dropped and the
+  other events are kept for the loop. Otherwise each re-tile would hand the focus to
+  whatever slid under the resting pointer, as awesome and dwm also avoid.
+- **The pointer wins after a close, explicitly** (M3). With crossings dropped, the
+  decision of 2026-10-31 needs a `QueryPointer` after re-arranging ([Z2]).
+- **Floating geometry is kept apart from the placed one** (M3). Each window has its
+  floating rectangle and the rectangle sugoi last configured; maximize and fullscreen
+  only change what is placed, so toggling back needs no saved geometry.
+- **Geometry actions float a tiled window** (M3). `center`, `move` and `resize` take it
+  out of the layout where it is; in awesome they did nothing visible on a tiled window.
+- **sugoi's unmaps are counted** (M3). Only the root's `UnmapNotify` counts, so the
+  window's own copy is not a second one; a synthetic one is a withdrawal (ICCCM 4.1.4).
+  M4 hides workspaces the same way.
+- **Size hints are ignored when tiling** (M3). Cells fill the column exactly, as the
+  awesome config had no gaps; increments would leave holes.
+- **Core cases run in the float layout** (M3), and test windows give a user position,
+  so they stay where the cases put them.
 - **Tile, max and float only** (user, 2026-10-31). awesome's fair, bottom and top
   variants are dropped.
 - **No swap with master** (user, 2026-10-31). Swapping with the next or previous window

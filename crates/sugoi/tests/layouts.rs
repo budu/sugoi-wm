@@ -9,6 +9,7 @@ use sugoi::{Binding, Choice, Command, Layout, Master, Settings, Side, State};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
+use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::wrapper::ConnectionExt as _;
 
 fn tiling() -> Session {
@@ -298,8 +299,21 @@ fn g2_mod_right_drag_resizes_from_the_corner() {
     let session = mouse();
     let apps = map(&session, 2);
     eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
-    // The pointer jumps to the corner, (639, 799), then moves by (+50, -50).
-    session.drag(SUPER, 3, (100, 100), (689, 749));
+    let fake = |kind, detail, x, y| {
+        session.conn.xtest_fake_input(kind, detail, 0, session.root, x, y, 0).unwrap();
+        session.conn.sync().unwrap();
+    };
+    fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
+    fake(KEY_PRESS_EVENT, SUPER, 0, 0);
+    fake(BUTTON_PRESS_EVENT, 3, 0, 0);
+    let pointer = || {
+        let p = session.conn.query_pointer(session.root).unwrap().reply().unwrap();
+        (p.root_x, p.root_y)
+    };
+    eventually("pointer at the corner", || pointer() == (639, 799));
+    fake(MOTION_NOTIFY_EVENT, 0, 689, 749);
+    fake(BUTTON_RELEASE_EVENT, 3, 0, 0);
+    fake(KEY_RELEASE_EVENT, SUPER, 0, 0);
     eventually("resized", || session.outer(apps[1].window) == (0, 0, 690, 750));
 }
 
@@ -333,4 +347,25 @@ fn z2_after_a_close_the_window_under_the_pointer_gets_the_focus() {
     apps[2].conn.destroy_window(apps[2].window).unwrap();
     apps[2].conn.sync().unwrap();
     eventually("b under the pointer", || session.focus() == apps[1].window);
+}
+
+/// [W6] and [M4]
+#[test]
+fn w6_a_client_withdrawing_a_minimized_window_unmanages_it() {
+    let session = tiling();
+    let apps = map(&session, 1);
+    send(&session, Command::Minimize);
+    eventually("iconic", || session.wm_state(apps[0].window) == Some(vec![3, 0]));
+    // ICCCM 4.1.4: a client withdraws an unmapped window with a synthetic UnmapNotify.
+    let unmap = UnmapNotifyEvent {
+        response_type: UNMAP_NOTIFY_EVENT,
+        sequence: 0,
+        event: session.root,
+        window: apps[0].window,
+        from_configure: false,
+    };
+    let mask = EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY;
+    apps[0].conn.send_event(false, session.root, mask, unmap).unwrap();
+    apps[0].conn.sync().unwrap();
+    eventually("withdrawn", || session.wm_state(apps[0].window).is_none());
 }

@@ -490,3 +490,39 @@ fn c3_a_config_cannot_trap_the_quit_signals() {
     let notes = notifications(&mut session);
     assert!(notes[0].ends_with("config.rb:1: sugoi handles SIGTERM (ArgumentError)"), "{notes:?}");
 }
+
+/// [Y7] and [Y2]
+#[test]
+fn y7_the_config_sets_the_layouts_and_the_master() {
+    let session = Session::with_config(
+        "layouts :max, :tile\nmaster side: :left, width: 0.6\nkey(\"Mod-x\") { layout :next }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    eventually("max first", || session.outer(a.window) == (0, 0, 1280, 800));
+    session.keys(&[SUPER, X]);
+    eventually("tile, master left", || session.outer(a.window) == (0, 0, 768, 800));
+}
+
+/// [W7] and [D5]
+#[test]
+fn w7_the_layout_actions_queue_commands() {
+    let session = Session::with_config("key(\"Mod-x\") { center size: 0.5 }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 100));
+    app.map();
+    eventually("full", || session.outer(app.window) == (0, 0, 1280, 800));
+    session.keys(&[SUPER, X]);
+    eventually("centered", || session.outer(app.window) == (320, 200, 640, 400));
+}
+
+/// [Y7] and [L4]
+#[test]
+fn y7_an_unknown_layout_fails_the_load() {
+    let mut session = Session::with_config("layouts :tile, :spiral\n");
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("expected one of :tile, :max, :float, not :spiral"), "{notes:?}");
+}
