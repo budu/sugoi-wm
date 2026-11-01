@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Workspaces** (M4). 30 workspaces in 3 banks of 10: Mod-n goes to n, then n+10 and
+  n+20 when pressed again; Mod-Shift-n moves the focused window the same way; next,
+  previous and back; a layout per workspace. Workspaces survive a restart. See
+  `doc/spec/workspaces.md`.
 - **Layouts and window states** (M3). Tile (master on the right, 0.5 wide), max and
   float; master width and stack shares; floating, maximized, fullscreen, on-top and
   minimized windows; centering with an optional size; Mod-drag move and resize.

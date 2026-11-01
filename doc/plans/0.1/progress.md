@@ -8,6 +8,7 @@ section.
 
 | Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
 |-----------|------------|------------|-------|---------|---------|----------------------|
+| M4        | 2026-11-01 | 2026-11-01 | 0.5   | 8       | 139/139 | 18 fixed, 1 declined |
 | M3        | 2026-11-01 | 2026-11-01 | 0.6   | 7       | 114/114 | 19 fixed, 1 declined |
 | M2        | 2026-10-31 | 2026-10-31 | 0.5   | 7       | 68/68   | 17 fixed, 2 declined |
 | M1        | 2026-10-31 | 2026-10-31 | 0.5   | 8       | 33/33   | 14 fixed, 3 declined |
@@ -17,12 +18,64 @@ entry splits them into main thread and background. Findings count both review ro
 a finding the user decides counts as fixed when a case pins the decision. Planning on
 `plan-0.1` took 0.1 h. Commits count this repository's only.
 
+Property tests scale with `SUGOI_PROPTEST_SCALE`; `scripts/proptest-long` runs the
+whole suite at 20 through nextest.
+
 ## Footprint
 
 Measured once, at the release (M8): RSS and idle CPU of the WM process. Reference:
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
 ## Entries
+
+### M4 Workspaces
+
+Status: closed 2026-11-01, on `m4-workspaces`, awaiting merge. No benchmarks: the
+footprint is measured at the release.
+
+- **Research.** M3's counted unmaps already hid minimized windows; workspaces reuse
+  them through one rule for what shows. A restart must keep each window's workspace,
+  which is EWMH's `_NET_WM_DESKTOP`, so that property and the root's current desktop
+  come now, the rest of EWMH in M7. Keycodes 10 to 19 are the keys 1 to 0 on Xvfb's
+  and most layouts.
+- **Decisions.** One mapping rule; hidden windows are iconic; the focus after a switch
+  is the history's; `workspace 11` to `30` are exact; the defaults bind the workspace
+  keys; sugoi's unmaps are told apart by sequence number. All in the
+  [decision notes](../notes.md#workspaces).
+- **Changes.** `doc/spec/workspaces.md` with 9 behaviors; `workspace.rs` and
+  `wm/desks.rs`; per-workspace layouts; the DSL's `workspace` and `move_to`;
+  `doc/config.rb` binds Mod-1 to Mod-0, their Shift chords, Mod-Left, Mod-Right,
+  Mod-Escape and the root's wheel. Code: 2,846 lines (2,527 after M3); tests: 3,092
+  lines (2,103).
+- **Property tests.** New in M4 (`properties_layout`, `properties_workspaces`): tile
+  cells checked pixel by pixel, share balance and growth, every workspace target
+  against a table from the spec's words, and histories of up to 24 operations through
+  X against a reference model, after a configure-request barrier. The tile property
+  found a real defect at once: rounding each stack height could push the last cell
+  past the column (a 38 px column, weights 0.5, 20, 1.5 and 0.01), fixed by rounding
+  the cumulative boundaries.
+- **Calibration.** 7 of 9 mutations of the workspace code fail a history (1 is
+  equivalent; restoring from another workspace needs a 5-step story, caught in 5 of 6
+  fresh gate runs); the M3 `grow_share` and a bank-blind cycling fail the pure
+  properties. Widened after the review: withdrawals, plain and racing a switch under a
+  server grab, which fail on the old counting rule in 4 of 4 fresh runs.
+- **Review.** `/code-review high` on the branch, then on the fixes.
+
+  | Round     | P1 | P2 | P3 | Resolution                          |
+  |-----------|---:|---:|---:|-------------------------------------|
+  | Review    |  0 |  4 |  6 | 10 fixed in `beaadbf`               |
+  | Re-review |  0 |  0 |  9 | 8 fixed in `80bb68a`, 1 declined    |
+
+  The P2s: an app's own unmap just before a switch hid its window was taken for
+  sugoi's, so the window was never unmanaged; withdrawn windows kept
+  `_NET_WM_DESKTOP`; the root had no current desktop until the first switch; a drag
+  kept moving a window a switch had hidden. Each has a case that fails on `2e77069`.
+  Declined: the 16-bit sequence window (over 32,768 requests before one event).
+- **Long runs.** `scripts/proptest-long`: 139 tests, 139 passed, in 1 min 46 s at
+  scale 20: 2,560 workspace histories, 30,720 cases of the pure properties. nextest
+  marked one test leaky (a child process outlived it); not yet traced.
+- **Left open.** The leaky test; EWMH desktop names, counts and client requests (M7).
+- **Hours.** 0.5 (main thread 0.5, background 0.0), from `agent-hours`.
 
 ### M3 Layouts
 
