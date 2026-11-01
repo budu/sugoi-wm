@@ -3,6 +3,7 @@
 mod apps;
 mod desks;
 mod ewmh;
+mod ipc;
 mod place;
 mod rules;
 
@@ -189,6 +190,8 @@ pub struct Wm {
     root_rect: Rect,
     /// [E2] Managed windows in the order they were managed.
     managed: Vec<Window>,
+    /// [I1] The IPC socket, if it could be made.
+    ipc: Option<ipc::Server>,
     /// [E4] Docks and their struts: left, right, top, bottom.
     docks: HashMap<Window, [u32; 4]>,
     published: ewmh::Published,
@@ -240,6 +243,10 @@ impl Wm {
     pub fn connect(display: Option<&str>, script: Box<dyn Script>) -> Result<Wm, Error> {
         let (conn, screen) = x11rb::connect(display)?;
         let root = conn.setup().roots[screen].root;
+        let display_name = display
+            .map(str::to_owned)
+            .or_else(|| std::env::var("DISPLAY").ok())
+            .unwrap_or_default();
         let (width, height) = {
             let s = &conn.setup().roots[screen];
             (u32::from(s.width_in_pixels), u32::from(s.height_in_pixels))
@@ -252,8 +259,7 @@ impl Wm {
         match conn.change_window_attributes(root, &attributes)?.check() {
             Ok(()) => {}
             Err(ReplyError::X11Error(e)) if e.error_kind == ErrorKind::Access => {
-                let name = display.map(str::to_owned).or_else(|| std::env::var("DISPLAY").ok());
-                return Err(Error::AnotherWm(name.unwrap_or_default()));
+                return Err(Error::AnotherWm(display_name));
             }
             Err(e) => return Err(lost(e)),
         }
@@ -297,6 +303,7 @@ impl Wm {
             root_rect: Rect::new(0, 0, width, height),
             managed: Vec::new(),
             docks: HashMap::new(),
+            ipc: ipc::Server::open(&display_name),
             published: ewmh::Published::default(),
             stack: Vec::new(),
             stacked: Vec::new(),
@@ -365,13 +372,26 @@ impl Wm {
                 self.execute(command)?;
                 continue;
             }
+            self.serve_ipc()?;
+            if !self.pending.is_empty() || !self.later_hooks.is_empty() || self.exit.is_some() {
+                continue;
+            }
             self.publish()?;
             self.conn.flush()?;
-            let mut fds = [
+            let mut fds = vec![
                 PollFd::new(self.conn.stream(), PollFlags::IN),
                 PollFd::new(&self.wake, PollFlags::IN),
             ];
-            match poll(&mut fds, None) {
+            let mut timeout = None;
+            if let Some(server) = &self.ipc {
+                fds.push(PollFd::new(&server.listener, PollFlags::IN));
+                fds.extend(server.clients.iter().map(|c| PollFd::new(&c.stream, PollFlags::IN)));
+                timeout = server.timeout().map(|d| {
+                    rustix::event::Timespec::try_from(d)
+                        .unwrap_or(rustix::event::Timespec { tv_sec: 1, tv_nsec: 0 })
+                });
+            }
+            match poll(&mut fds, timeout.as_ref()) {
                 Ok(_) | Err(rustix::io::Errno::INTR) => {}
                 Err(e) => return Err(Error::Io(e.into())),
             }
@@ -410,7 +430,7 @@ impl Wm {
                     self.close(window)?;
                 }
             }
-            Command::Spawn { name, argv, limits } => spawn(&name, &argv, &limits),
+            Command::Spawn { name, argv, limits } => spawn(&name, &argv, &limits, self.socket()),
             Command::Kill => {
                 if let Some(window) = self.focused {
                     self.kill(window)?;

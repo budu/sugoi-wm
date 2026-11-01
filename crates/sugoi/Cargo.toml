@@ -10,6 +10,7 @@ log = "0.4.35"
 magnus = { version = "0.9", features = ["embed"] }
 rustix = { version = "1.1.6", features = ["event"] }
 signal-hook = "0.4.6"
+sugoictl = { version = "0.1.0", path = "../sugoictl" }
 x11rb = { version = "0.14", features = ["res"] }
 xkbcommon = { version = "0.9", default-features = false }
 

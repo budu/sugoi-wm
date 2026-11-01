@@ -761,6 +761,7 @@ dependencies = [
  "proptest",
  "rustix",
  "signal-hook",
+ "sugoictl",
  "x11rb",
  "xkbcommon",
 ]

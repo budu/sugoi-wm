@@ -382,6 +382,14 @@ pub trait Script {
     ) -> Result<Vec<Command>, String> {
         Err(format!("no hook block {block}"))
     }
+    /// [I2] Runs a request's Ruby: its value as `inspect` gives it, and its commands.
+    fn eval(
+        &mut self,
+        _code: &str,
+        _windows: &[Snapshot],
+    ) -> Result<(String, Vec<Command>), String> {
+        Err("this sugoi runs without Ruby".into())
+    }
 }
 
 /// [L3] The built-in settings, without Ruby.

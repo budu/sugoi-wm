@@ -1,13 +1,15 @@
 //! Starting programs ([P1]) and notifications ([L4], [R1]).
 
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use log::{info, warn};
 
 use crate::Limits;
 
-/// [P1] [A1] Starts `argv` in its own systemd scope under `app-<name>.slice`.
-pub fn spawn(name: &str, argv: &[String], limits: &Limits) {
+/// [P1] [A1] Starts `argv` in its own systemd scope under `app-<name>.slice`; [I1] tells
+/// it where sugoi's `socket` is.
+pub fn spawn(name: &str, argv: &[String], limits: &Limits, socket: Option<&Path>) {
     info!("spawn {name}: {argv:?} {limits:?}");
     let slice = format!("--slice=app-{}.slice", unit_name(name));
     let mut command: Vec<String> = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
@@ -23,7 +25,7 @@ pub fn spawn(name: &str, argv: &[String], limits: &Limits) {
     }
     command.push("--".into());
     command.extend(argv.iter().cloned());
-    start(command.iter().map(String::as_str));
+    start(command.iter().map(String::as_str), socket);
 }
 
 /// [A4] Kills every process of a systemd user unit; false if `systemctl` fails. It runs
@@ -49,13 +51,13 @@ pub fn kill_unit(unit: &str) -> bool {
 
 /// Shows `message` through the notification daemon (dunst), if there is one.
 pub fn notify(message: &str) {
-    start(["notify-send", "--app-name=sugoi", "sugoi", message]);
+    start(["notify-send", "--app-name=sugoi", "sugoi", message], None);
 }
 
 /// Runs `argv` through `setsid -f`, so the program is never sugoi's child: it is reaped
 /// across a restart, and gets no signal sent to sugoi's group. `setsid` forks and exits
 /// at once, so waiting for it does not block.
-fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
+fn start<'a>(argv: impl IntoIterator<Item = &'a str>, socket: Option<&Path>) {
     let mut argv = argv.into_iter();
     let Some(program) = argv.next() else { return };
     // `setsid -f` exits 0 even when the program is missing, so look first.
@@ -65,6 +67,9 @@ fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
     }
     let mut command = Command::new("setsid");
     command.arg("-f").arg(program).args(argv).stdin(Stdio::null());
+    if let Some(socket) = socket {
+        command.env(sugoictl::SOCKET_VARIABLE, socket);
+    }
     if let Err(e) = command.spawn().and_then(|mut setsid| setsid.wait()) {
         warn!("cannot start {program}: {e}");
     }

@@ -120,6 +120,14 @@ module Sugoi
     def act(*command) = Sugoi.queue("on", id.to_s, *command)
   end
 
+  # [I2] What a sugoictl request runs in.
+  class Request
+    include Actions
+
+    # A string eval sees the caller's locals: here only the code itself.
+    def run(code) = instance_eval(code, "sugoictl", 1)
+  end
+
   # The object a config file runs in.
   class Config
     include Actions
@@ -262,7 +270,21 @@ module Sugoi
       @windows = nil
     end
 
-    def windows = @windows || raise("windows are only known in a hook")
+    # [I2] Runs a request from sugoictl: [its value, inspected, and its commands], or an
+    # error message.
+    def eval_request(code, windows)
+      @queue = []
+      @windows = windows.map { |w| Window.new(*w) }.freeze
+      value = Timeout.timeout(TIME_LIMIT) { Request.new.run(code) }
+      [value.inspect, @queue]
+    rescue ScriptError, StandardError => e
+      describe(e)
+    ensure
+      @queue = nil
+      @windows = nil
+    end
+
+    def windows = @windows || raise("windows are only known in a hook or a request")
 
     def queue(*command)
       raise "actions only run inside a key or button block" unless @queue

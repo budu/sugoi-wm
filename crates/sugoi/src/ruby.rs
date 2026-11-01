@@ -181,6 +181,18 @@ impl Script for RubyScript {
         commands.iter().map(|c| command(c)).collect()
     }
 
+    fn eval(&mut self, code: &str, windows: &[Snapshot]) -> Result<(String, Vec<Command>), String> {
+        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
+        let value: Value = self.call("eval_request", (code.to_owned(), windows))?;
+        if let Some(message) = RString::from_value(value) {
+            return Err(message.to_string().map_err(|e| e.to_string())?);
+        }
+        let (inspected, commands) =
+            <(String, Vec<Vec<String>>)>::try_convert(value).map_err(|e| e.to_string())?;
+        let commands = commands.iter().map(|c| command(c)).collect::<Result<_, _>>()?;
+        Ok((inspected, commands))
+    }
+
     fn hook(
         &mut self,
         block: usize,
