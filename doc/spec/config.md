@@ -48,7 +48,7 @@ hooks (M5), spawn limits (M6).
     can take the focus ([F4]), and raise it.
   - `swap :next` and `swap :previous` swap the focused window with its neighbor in the
     window order; the focus stays on it.
-  - `close` closes the focused window ([K1]).
+  - `close` closes the focused window ([K1]); `kill` ends its whole app ([A4]).
   - `spawn "kitty"` and `spawn "bash", "-ic", "~/bin/superkitty", name: "superkitty"`
     start a program ([P1]); `name` defaults to the basename of the first argument.
   - `sh "overmind restart -s ~/x.sock"` is `spawn "sh", "-c", ...` named `sh`.
@@ -75,4 +75,5 @@ hooks (M5), spawn limits (M6).
   --slice=app-<name>.slice -- <argv>`, as the awesome config does, so each app gets its
   own cgroup scope. It starts through `setsid -f`, so it inherits sugoi's environment
   but is not sugoi's child: no zombie is left when it exits, even after a restart, and
-  no signal to sugoi's process group reaches it. M6 replaces the mechanism.
+  no signal to sugoi's process group reaches it. Limits and killing an app's unit are in
+  `doc/spec/apps.md`.

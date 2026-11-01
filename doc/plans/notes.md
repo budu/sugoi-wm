@@ -134,7 +134,8 @@ each section.
   `rule_any`; Rust and Ruby regular expressions differ, and no awesome rule needed one.
 - **Rules apply again when `WM_CLASS` changes** (M5). The awesome Zed rule never
   matched; an app setting its class after the map is one explanation, and this covers
-  it either way. Zed needs DRI3, which Xvfb lacks, so it could not be checked here.
+  it either way. The user no longer uses Zed (2026-11-01): its binding and rule are
+  gone from `doc/config.rb`.
 - **Manage hooks only for new windows** (M5), so a restart does not run them again on
   every adopted window (the browser hook would float windows that were tiled).
 - **No hooks during a hook's actions** (M5): a `:focus` hook that moves the focus would

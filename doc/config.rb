@@ -27,7 +27,6 @@ key("Mod-Ctrl-Return") do
 end
 key("Mod-d") { spawn "/usr/bin/thunar", name: "thunar" }
 key("Mod-e") { spawn "/usr/bin/emacs", name: "emacs" }
-key("Mod-z") { spawn "/usr/bin/zeditor", name: "zeditor" }
 key("Mod-i") { spawn "/home/budu/bin/chromium-launcher", name: "chromium" }
 key("Mod-b") { spawn "/usr/bin/firefox", name: "firefox" }
 key("Mod-p") { spawn "rofi", "-show", "drun" }
@@ -71,10 +70,6 @@ rule class: "Soffice", float: true, size: [2000, 1200], center: true
 rule class: %w[Caprine Thunar], float: true
 rule class: "feh", float: true, size: [2000, 1200], center: true
 rule class: %w[Emacs Cursor], master: true
-# Zed's WM_CLASS is unverified (`xprop WM_CLASS` on its window tells); rules apply again
-# if it comes after the map, which may be why the awesome rule never matched.
-rule instance: "dev.zed.Zed", master: true
-rule class: "dev.zed.Zed", master: true
 
 # Float browser windows but the first one on a workspace
 BROWSERS = %w[Chromium firefox].freeze

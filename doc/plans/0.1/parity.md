@@ -18,7 +18,8 @@ everything that works today.
 | Mod-Shift-q quit (with no focus) | Mod-Shift-q closes the window      | Dropped, decided |
 | Mod-Shift-e quit, dmenu confirm | `quit`, without the confirmation    | M2; confirm M7  |
 | Mod-y overmind restart       | `sh`                                   | M2              |
-| Mod-d, e, z, i, b apps       | `spawn` thunar, emacs, zeditor, ...    | M2              |
+| Mod-d, e, i, b apps          | `spawn` thunar, emacs, chromium, ...   | M2              |
+| Mod-z zeditor                | none                                   | Dropped, no Zed |
 | Mod-p menubar                | `spawn "rofi", "-show", "drun"`        | M2              |
 | Mod-; and Mod-h master width | master width factor                    | M3              |
 | Mod-Shift-n, i client height | per-client height factor               | M3              |
@@ -77,7 +78,7 @@ and then call `sugoictl` once IPC exists (M7).
 | feh float, 2000×1200, center | rule by class                          | M5              |
 | Browsers: 2nd on a tag floats | `on :manage` hook with a query        | M5              |
 | Emacs, Cursor as master      | rule by class                          | M5              |
-| Zed as master (FIXME)        | rule by instance or class, again late  | M5              |
+| Zed as master (FIXME)        | none                                   | Dropped, no Zed |
 
 ## Outside bindings and rules
 
