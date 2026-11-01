@@ -145,6 +145,19 @@ each section.
 
 ## Spawning
 
+- **`systemd-run`, not a D-Bus client** (M6). The plan left the choice to research:
+  `systemd-run --scope` took about 5 ms a spawn, becomes the app (same process ID),
+  and takes limits with `-p`; a D-Bus client would add zbus and a fork-then-register
+  handshake for no gain. Scopes keep their `run-p<pid>-i<n>.scope` names.
+- **`kill` only stops app scopes, never sugoi's own** (M6). The live session runs the
+  WM in `session-3.scope`, so a window of something the X session started shares it;
+  and the test shell ran inside Emacs's app scope. `kill` stops a unit only when it is a
+  scope in the user manager's `app.slice` and not sugoi's cgroup; else it closes.
+- **A process ID counts only with this host's `WM_CLIENT_MACHINE`** (M6), as ICCCM asks;
+  a remote client's pid would name an unrelated local process.
+- **Kill cases use real scopes they start** (M6), named `sugoi-test-*`, never with a
+  test process's own pid; the own-scope guard is a unit test of a pure function, since
+  testing it for real would aim at the editor running the tests.
 - **Apps start through `setsid -f`** (M2, review). `systemd-run --scope` runs the app
   as the caller's child; through `setsid -f` it is never sugoi's, so nothing is left to
   reap after a restart (the first version reaped in a thread per app, and a restart
