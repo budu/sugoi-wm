@@ -544,14 +544,11 @@ impl Wm {
 
     /// [S2] [V9]
     fn adopt(&mut self) -> Result<(), Error> {
-        if let Some(current) = self.read_desktop(self.root, self.atoms._NET_CURRENT_DESKTOP)? {
-            self.current = current;
-            self.back = current;
+        match self.read_desktop(self.root, self.atoms._NET_CURRENT_DESKTOP)? {
+            Some(current) => (self.current, self.back) = (current, current),
+            // [V9] The root says which workspace is current from the start.
+            None => self.set_current_desktop()?,
         }
-        // [V9] The root says which workspace is current from the start.
-        let (atom, cardinal, value) =
-            (self.atoms._NET_CURRENT_DESKTOP, AtomEnum::CARDINAL, [self.current as u32]);
-        self.conn.change_property32(PropMode::REPLACE, self.root, atom, cardinal, &value)?;
         let tree = self.conn.query_tree(self.root)?.reply().map_err(lost)?;
         let cookies = tree
             .children

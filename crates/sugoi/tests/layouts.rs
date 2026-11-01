@@ -495,6 +495,12 @@ fn g1_a_switch_during_a_drag_ends_it() {
     fake(KEY_PRESS_EVENT, common::keycode::ONE + 1, 0, 0);
     fake(KEY_RELEASE_EVENT, common::keycode::ONE + 1, 0, 0);
     eventually("hidden", || !session.viewable(apps[0].window));
+    // The drag is over at once: sugoi's pointer grab is gone, so the test can grab.
+    let (root, async_) = (session.root, GrabMode::ASYNC);
+    let mask = EventMask::POINTER_MOTION;
+    let grab = session.conn.grab_pointer(false, root, mask, async_, async_, 0u32, 0u32, 0u32);
+    assert_eq!(grab.unwrap().reply().unwrap().status, GrabStatus::SUCCESS);
+    session.conn.ungrab_pointer(0u32).unwrap();
     fake(MOTION_NOTIFY_EVENT, 0, 300, 300);
     settle();
     fake(BUTTON_RELEASE_EVENT, 1, 0, 0);

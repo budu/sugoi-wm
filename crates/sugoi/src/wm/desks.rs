@@ -48,10 +48,21 @@ impl Wm {
             self.set_state(window, NORMAL_STATE)
         } else {
             let sequence = self.conn.unmap_window(window)?.sequence_number();
-            let client = self.clients.get_mut(&window).expect("shown windows are managed");
             client.unmaps.push_back(sequence as u16);
+            // [G1] A hidden window cannot be dragged on.
+            if self.drag.as_ref().is_some_and(|d| d.window() == window) {
+                self.end_drag()?;
+            }
             self.set_state(window, ICONIC_STATE)
         }
+    }
+
+    /// [V9]
+    pub(super) fn set_current_desktop(&self) -> Result<(), Error> {
+        let (atom, cardinal) = (self.atoms._NET_CURRENT_DESKTOP, AtomEnum::CARDINAL);
+        let value = [self.current as u32];
+        self.conn.change_property32(PropMode::REPLACE, self.root, atom, cardinal, &value)?;
+        Ok(())
     }
 
     pub(super) fn set_state(&self, window: Window, state: u32) -> Result<(), Error> {
@@ -94,9 +105,7 @@ impl Wm {
         }
         self.back = self.current;
         self.current = target;
-        let (atom, cardinal) = (self.atoms._NET_CURRENT_DESKTOP, AtomEnum::CARDINAL);
-        let value = [target as u32];
-        self.conn.change_property32(PropMode::REPLACE, self.root, atom, cardinal, &value)?;
+        self.set_current_desktop()?;
         // Place the new workspace's windows, show them, then hide the old ones.
         self.arrange()?;
         let (show, hide): (Vec<Window>, Vec<Window>) =

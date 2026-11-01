@@ -33,7 +33,9 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   nothing changes, sugoi sends a synthetic `ConfigureNotify` with the current geometry
   (ICCCM 4.1.5).
 - **[M4] Unmanage.** A managed window stops being managed when it is destroyed or
-  unmapped by its client, even while sugoi is hiding it ([V2]). An unmapped window may
+  unmapped by its client, also when that unmap reaches the server just before sugoi
+  hides the window ([V2]); an app withdrawing a window sugoi has already hidden sends
+  the synthetic `UnmapNotify` ICCCM 4.1.4 asks for. An unmapped window may
   be reused (a tray icon), so sugoi deletes its `WM_STATE` and `_NET_WM_DESKTOP`,
   releases its button grabs and event selection, and restores its original border
   width. If it had the focus, the next window gets it ([F5]).

@@ -307,7 +307,9 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                     }
                 }
                 conn.unmap_window(app.window).unwrap();
-                conn.ungrab_server().unwrap();
+                if let Op::WithdrawSwitching(..) = op {
+                    conn.ungrab_server().unwrap();
+                }
                 conn.sync().unwrap();
                 model.windows.retain(|w| w.window != app.window);
                 model.history.retain(|&w| w != app.window);

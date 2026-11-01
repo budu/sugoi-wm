@@ -349,9 +349,12 @@ impl Wm {
         let window = drag.window;
         // A key may have changed the window's state during the drag: it wins.
         // A switch or a move may have hidden it ([V2]).
-        let floating = self.visible(window)
-            && !self.tiled(window)
-            && !(self.clients[&window].maximized || self.clients[&window].fullscreen);
+        let shown = self.visible(window) && !self.tiled(window);
+        let floating = shown
+            && !{
+                let c = &self.clients[&window];
+                c.maximized || c.fullscreen
+            };
         if !floating {
             return self.end_drag();
         }

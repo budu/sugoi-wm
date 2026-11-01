@@ -65,9 +65,14 @@ pub fn tile(area: Rect, master: Master, shares: &[f32]) -> Vec<Rect> {
     let total: f32 = shares.iter().sum();
     let mut sum = 0.0;
     let mut top = 0u32;
-    for share in shares {
+    for (index, share) in shares.iter().enumerate() {
         sum += share;
-        let bottom = ((area.height as f32 * sum / total).round() as u32).min(area.height);
+        // The last cell ends the column, whatever the float error in its boundary.
+        let bottom = if index + 1 == shares.len() {
+            area.height
+        } else {
+            ((area.height as f32 * sum / total).round() as u32).min(area.height)
+        };
         cells.push(Rect::new(stack_x, area.y + top as i32, stack_width, bottom - top));
         top = bottom;
     }
