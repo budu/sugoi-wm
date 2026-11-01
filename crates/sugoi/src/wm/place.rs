@@ -205,7 +205,7 @@ impl Wm {
 
     /// Takes a tiled window out of the layout where it is ([W1], [W7], [G1]).
     /// A tiled, maximized or fullscreen window floats where it shows ([W7], [G1]).
-    fn float(&mut self, window: Window) {
+    pub(super) fn float(&mut self, window: Window) {
         let tiled = self.tiled(window);
         let rect = self.placed(window);
         let client = self.clients.get_mut(&window).expect("managed");

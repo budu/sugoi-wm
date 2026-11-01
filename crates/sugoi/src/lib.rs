@@ -68,6 +68,10 @@ pub struct Settings {
     /// [Y7] The layout cycle; the first is the starting layout. Never empty.
     pub layouts: Vec<Layout>,
     pub master: Master,
+    /// [U2] to [U4] In config order, after the built-in ones ([U5]).
+    pub rules: Vec<Rule>,
+    /// [H1] Blocks by event, in config order.
+    pub hooks: Vec<(Event, usize)>,
 }
 
 impl Default for Settings {
@@ -101,6 +105,8 @@ impl Default for Settings {
             root_buttons: Vec::new(),
             layouts: vec![Layout::Tile, Layout::Max, Layout::Float],
             master: Master::default(),
+            rules: Vec::new(),
+            hooks: Vec::new(),
         }
     }
 }
@@ -177,6 +183,160 @@ pub enum Command {
     Workspace(Goto),
     /// [V8]
     MoveTo(u32),
+    /// [H2] An action on one window, from a hook.
+    On(u32, WindowCommand),
+}
+
+/// [H2] What a hook's window can do.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowCommand {
+    /// [W1] Float, or go back to the layout.
+    Float(bool),
+    Size(u32, u32),
+    Center,
+    Master,
+    MoveTo(u32),
+    Close,
+}
+
+/// [U1]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowType {
+    Normal,
+    Dialog,
+    Splash,
+    Utility,
+    Toolbar,
+    Menu,
+}
+
+impl WindowType {
+    pub const ALL: [(WindowType, &'static str); 6] = [
+        (WindowType::Normal, "normal"),
+        (WindowType::Dialog, "dialog"),
+        (WindowType::Splash, "splash"),
+        (WindowType::Utility, "utility"),
+        (WindowType::Toolbar, "toolbar"),
+        (WindowType::Menu, "menu"),
+    ];
+
+    pub fn name(self) -> &'static str {
+        WindowType::ALL.iter().find(|(t, _)| *t == self).map_or("normal", |(_, n)| n)
+    }
+
+    pub fn from_name(name: &str) -> Option<WindowType> {
+        WindowType::ALL.iter().find(|(_, n)| *n == name).map(|(t, _)| *t)
+    }
+}
+
+/// [U1] What a window is, as rules and hooks see it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Info {
+    pub class: String,
+    pub instance: String,
+    pub title: String,
+    pub kind: Option<WindowType>,
+    pub transient: bool,
+}
+
+impl Info {
+    /// [U1] `:normal` without a known type.
+    pub fn kind(&self) -> WindowType {
+        self.kind.unwrap_or(WindowType::Normal)
+    }
+}
+
+/// [U2] Empty lists match anything.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Matcher {
+    pub class: Vec<String>,
+    pub instance: Vec<String>,
+    pub title: Vec<String>,
+    pub types: Vec<WindowType>,
+    pub transient: Option<bool>,
+}
+
+impl Matcher {
+    pub fn matches(&self, info: &Info) -> bool {
+        let any = |list: &[String], value: &str| list.is_empty() || list.iter().any(|v| v == value);
+        any(&self.class, &info.class)
+            && any(&self.instance, &info.instance)
+            && any(&self.title, &info.title)
+            && (self.types.is_empty() || self.types.contains(&info.kind()))
+            && self.transient.is_none_or(|t| t == info.transient)
+    }
+}
+
+/// [U3] What a rule sets; `None` and `false` leave a property to other rules.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Effects {
+    pub float: Option<bool>,
+    pub size: Option<(u32, u32)>,
+    pub center: bool,
+    pub on_top: Option<bool>,
+    pub master: bool,
+    pub workspace: Option<u32>,
+}
+
+impl Effects {
+    /// [U4] `later` replaces what it sets.
+    pub fn then(self, later: &Effects) -> Effects {
+        Effects {
+            float: later.float.or(self.float),
+            size: later.size.or(self.size),
+            center: self.center || later.center,
+            on_top: later.on_top.or(self.on_top),
+            master: self.master || later.master,
+            workspace: later.workspace.or(self.workspace),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rule {
+    pub matcher: Matcher,
+    pub effects: Effects,
+}
+
+impl Rule {
+    /// [U5] Transients, dialogs, splash screens and utility windows float.
+    pub fn defaults() -> Vec<Rule> {
+        let float = Effects { float: Some(true), ..Effects::default() };
+        let types = vec![WindowType::Dialog, WindowType::Splash, WindowType::Utility];
+        vec![
+            Rule {
+                matcher: Matcher { transient: Some(true), ..Matcher::default() },
+                effects: float.clone(),
+            },
+            Rule { matcher: Matcher { types, ..Matcher::default() }, effects: float },
+        ]
+    }
+}
+
+/// [H1]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event {
+    Manage,
+    Focus,
+    Unmanage,
+    Workspace,
+}
+
+/// [H2] A window as a hook sees it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Snapshot {
+    pub id: u32,
+    pub info: Info,
+    /// 1 to 30.
+    pub workspace: u32,
+    pub floating: bool,
+}
+
+/// [H1] What a hook gets.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HookArg {
+    Window(Snapshot),
+    Workspace(u32),
 }
 
 /// The configuration's code: loads settings and runs the blocks bindings point to.
@@ -187,6 +347,15 @@ pub trait Script {
     fn commit(&mut self) {}
     /// [R1] and [R2] Runs a block; an error message means none of its commands run.
     fn run(&mut self, block: usize) -> Result<Vec<Command>, String>;
+    /// [H1] to [H4] Runs a hook's block with its argument and the managed windows.
+    fn hook(
+        &mut self,
+        block: usize,
+        _arg: &HookArg,
+        _windows: &[Snapshot],
+    ) -> Result<Vec<Command>, String> {
+        Err(format!("no hook block {block}"))
+    }
 }
 
 /// [L3] The built-in settings, without Ruby.

@@ -35,9 +35,10 @@ the identifiers in brackets.
 ## Hooks
 
 - **[H1] Events.** `on(:manage) { |window| ... }` runs after the rules, before the
-  window shows; `on(:focus)` after a window gets the focus; `on(:unmanage)` after a
-  window is gone; `on(:workspace) { |n| ... }` after a switch, with the new number.
-  Several blocks for one event run in config order.
+  window shows, for new windows only (not those adopted at startup, so a restart does
+  not run them again); `on(:focus)` after a window gets the focus; `on(:unmanage)`
+  after a window is gone; `on(:workspace) { |n| ... }` after a switch, with the new
+  number. Several blocks for one event run in config order.
 - **[H2] Windows.** A hook's window is read-only: `id`, `class_name`, `instance`,
   `title`, `type`, `transient?`, `workspace` (1 to 30) and `floating?`, as they were
   when the hook started. Its methods `float`, `tile`, `size(w, h)`, `center`, `master`,

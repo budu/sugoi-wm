@@ -2,6 +2,7 @@
 
 mod desks;
 mod place;
+mod rules;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
@@ -27,7 +28,10 @@ use crate::chord::{self, Key};
 use crate::keyboard::Keyboard;
 use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
-use crate::{Action, Border, Command, Direction, Error, Handle, Script, Settings};
+use crate::{
+    Action, Border, Command, Direction, Error, Event as HookEvent, Handle, HookArg, Info, Rule,
+    Script, Settings,
+};
 use desks::Desk;
 use place::Drag;
 
@@ -39,6 +43,15 @@ x11rb::atom_manager! {
         WM_STATE,
         _NET_WM_DESKTOP,
         _NET_CURRENT_DESKTOP,
+        _NET_WM_NAME,
+        UTF8_STRING,
+        _NET_WM_WINDOW_TYPE,
+        _NET_WM_WINDOW_TYPE_NORMAL,
+        _NET_WM_WINDOW_TYPE_DIALOG,
+        _NET_WM_WINDOW_TYPE_SPLASH,
+        _NET_WM_WINDOW_TYPE_UTILITY,
+        _NET_WM_WINDOW_TYPE_TOOLBAR,
+        _NET_WM_WINDOW_TYPE_MENU,
     }
 }
 
@@ -52,6 +65,8 @@ const CLICKS: [ButtonIndex; 3] = [ButtonIndex::M1, ButtonIndex::M2, ButtonIndex:
 /// A managed window.
 struct Client {
     hints: Hints,
+    /// [U1]
+    info: Info,
     /// The border width before sugoi managed the window, restored on withdrawal.
     border_width: u16,
     /// The outer rectangle the window has when it floats.
@@ -113,6 +128,12 @@ pub struct Wm {
     root_buttons: HashMap<(u16, u8), Action>,
     /// Whether a config has loaded, so a failed reload keeps it ([L4]).
     loaded: bool,
+    /// [U4] [U5] The built-in rules, then the config's.
+    rules: Vec<Rule>,
+    /// [H1]
+    hooks: Vec<(HookEvent, usize)>,
+    /// [H4] Whether a hook's actions are running.
+    in_hook: bool,
     /// [Y7]
     layouts: Vec<Layout>,
     /// [V3] Each workspace's layout and master column.
@@ -209,6 +230,9 @@ impl Wm {
             buttons: HashMap::new(),
             root_buttons: HashMap::new(),
             loaded: false,
+            rules: Rule::defaults(),
+            hooks: Vec::new(),
+            in_hook: false,
             layouts: vec![Layout::Tile],
             desks: vec![
                 Desk { layout: Layout::Tile, master: Master::default() };
@@ -339,6 +363,7 @@ impl Wm {
             Command::Resize => self.start_drag(true)?,
             Command::Workspace(goto) => self.switch(goto)?,
             Command::MoveTo(n) => self.move_to(n)?,
+            Command::On(window, command) => self.window_command(window, command)?,
         }
         Ok(())
     }
@@ -414,6 +439,8 @@ impl Wm {
             desk.master = bindings.master;
         }
         self.layouts = bindings.layouts;
+        self.rules = Rule::defaults().into_iter().chain(bindings.rules).collect();
+        self.hooks = bindings.hooks;
         self.regrab(true)?;
         // [L5] Place every window again, with the new border.
         for client in self.clients.values_mut() {
@@ -654,14 +681,32 @@ impl Wm {
                 self.keyboard = Keyboard::read(&self.conn)?;
                 self.regrab(false)?;
             }
-            Event::PropertyNotify(e) => {
+            Event::PropertyNotify(e) if self.clients.contains_key(&e.window) => {
                 let hints: Atom = AtomEnum::WM_HINTS.into();
-                if (e.atom == hints || e.atom == self.atoms.WM_PROTOCOLS)
-                    && self.clients.contains_key(&e.window)
-                    && let Some(hints) = self.read_hints(e.window)?
-                    && let Some(client) = self.clients.get_mut(&e.window)
-                {
-                    client.hints = hints;
+                let (class, name): (Atom, Atom) =
+                    (AtomEnum::WM_CLASS.into(), AtomEnum::WM_NAME.into());
+                if e.atom == hints || e.atom == self.atoms.WM_PROTOCOLS {
+                    if let Some(hints) = self.read_hints(e.window)?
+                        && let Some(client) = self.clients.get_mut(&e.window)
+                    {
+                        client.hints = hints;
+                    }
+                } else if e.atom == class || e.atom == name || e.atom == self.atoms._NET_WM_NAME {
+                    let cookies = self.request_info(e.window)?;
+                    let info = self.read_info(cookies)?;
+                    let client = self.clients.get_mut(&e.window).expect("managed");
+                    let reclassed = (&client.info.class, &client.info.instance)
+                        != (&info.class, &info.instance);
+                    client.info = info;
+                    // [U6] Some apps set WM_CLASS only after mapping.
+                    if reclassed {
+                        self.apply_rules(e.window, false)?;
+                        self.arrange()?;
+                        self.show(e.window)?;
+                        if !self.visible(e.window) {
+                            self.refocus(e.window)?;
+                        }
+                    }
                 }
             }
             // [M5]
@@ -713,6 +758,7 @@ impl Wm {
         self.conn.change_window_attributes(window, &attributes)?;
         let geometry = self.conn.get_geometry(window)?;
         let size_hints = WmSizeHints::get_normal_hints(&self.conn, window)?;
+        let info = self.request_info(window)?;
         // [V9] An adopted window goes back on its workspace; a new one on the current.
         let (atom, cardinal) = (self.atoms._NET_WM_DESKTOP, AtomEnum::CARDINAL);
         let kept = if map {
@@ -720,6 +766,7 @@ impl Wm {
         } else {
             Some(self.conn.get_property(false, window, atom, cardinal, 0, 1)?)
         };
+        let info = self.read_info(info)?;
         let Some(hints) = self.read_hints(window)? else {
             return Ok(());
         };
@@ -747,6 +794,7 @@ impl Wm {
         let rect = Rect::new(geometry.x.into(), geometry.y.into(), width + border, height + border);
         let client = Client {
             hints,
+            info,
             border_width: geometry.border_width,
             rect: if map { self.initial_rect(rect, positioned) } else { rect },
             placed: None,
@@ -764,11 +812,20 @@ impl Wm {
         self.order.push(window);
         self.history.push(window);
         self.stack.push(window);
+        // [U6] [U7] Rules before the window shows; the manage hooks for new windows.
+        self.apply_rules(window, kept.is_some())?;
         if map {
+            let snapshot = self.snapshot(window);
+            self.run_hooks(HookEvent::Manage, HookArg::Window(snapshot))?;
+            if !self.clients.contains_key(&window) {
+                return Ok(());
+            }
             self.arrange()?;
             self.show(window)?;
-            // [F1]
-            self.focus(window, true)?;
+            // [F1], unless the window went to another workspace ([U7]).
+            if self.visible(window) {
+                self.focus(window, true)?;
+            }
         }
         Ok(())
     }
@@ -797,7 +854,15 @@ impl Wm {
         }
         self.stacked.retain(|&w| w != window);
         self.arrange()?;
-        self.refocus(window)
+        self.refocus(window)?;
+        // [H1] The window as it was.
+        let gone = crate::Snapshot {
+            id: window,
+            info: client.info,
+            workspace: client.workspace as u32 + 1,
+            floating: client.floating,
+        };
+        self.run_hooks(HookEvent::Unmanage, HookArg::Window(gone))
     }
 
     /// [M3] [Y9]
@@ -872,7 +937,12 @@ impl Wm {
         self.conn.change_window_attributes(window, &focused)?;
         self.history.retain(|&w| w != window);
         self.history.insert(0, window);
+        let changed = self.focused != Some(window);
         self.focused = Some(window);
+        if changed {
+            let snapshot = self.snapshot(window);
+            self.run_hooks(HookEvent::Focus, HookArg::Window(snapshot))?;
+        }
         Ok(())
     }
 
@@ -966,6 +1036,8 @@ pub(crate) fn lost(e: ReplyError) -> Error {
 /// Settings whose chords parsed: what `install` makes current.
 struct Bindings {
     border: Border,
+    rules: Vec<Rule>,
+    hooks: Vec<(HookEvent, usize)>,
     layouts: Vec<Layout>,
     master: Master,
     keys: Vec<(String, ModMask, Key, Action)>,
@@ -998,8 +1070,15 @@ impl Bindings {
             let (least, most) = (crate::layout::MIN_FACTOR, crate::layout::MAX_FACTOR);
             return Err(format!("master width must be between {least} and {most}, not {width}"));
         }
+        for rule in &settings.rules {
+            if let Some(n) = rule.effects.workspace.filter(|n| !(1..=30).contains(n)) {
+                return Err(format!("rule workspace must be 1 to 30, not {n}"));
+            }
+        }
         Ok(Bindings {
             border: settings.border,
+            rules: settings.rules.clone(),
+            hooks: settings.hooks.clone(),
             layouts: settings.layouts.clone(),
             master: settings.master,
             keys,

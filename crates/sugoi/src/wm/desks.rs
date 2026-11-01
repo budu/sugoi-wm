@@ -8,7 +8,7 @@ use x11rb::{CURRENT_TIME, NONE};
 use super::{NORMAL_STATE, POINTER_ROOT, Wm};
 use crate::layout::{Layout, Master};
 use crate::workspace::{self, COUNT};
-use crate::{Error, Goto};
+use crate::{Error, Event, Goto, HookArg};
 
 /// `IconicState` in `WM_STATE` (ICCCM 4.1.3.1).
 pub(super) const ICONIC_STATE: u32 = 3;
@@ -114,6 +114,7 @@ impl Wm {
             self.show(window)?;
         }
         self.ignore_crossings()?;
+        self.run_hooks(Event::Workspace, HookArg::Workspace(target as u32 + 1))?;
         // [V7]
         if let Some(previous) = self.focused.take() {
             self.unfocus(previous)?;
@@ -129,7 +130,14 @@ impl Wm {
 
     /// [V8]
     pub(super) fn move_to(&mut self, n: u32) -> Result<(), Error> {
-        let Some(window) = self.focused else { return Ok(()) };
+        match self.focused {
+            Some(window) => self.move_window(window, n),
+            None => Ok(()),
+        }
+    }
+
+    /// [V8] [H2]
+    pub(super) fn move_window(&mut self, window: Window, n: u32) -> Result<(), Error> {
         let from = self.clients[&window].workspace;
         let Some(target) = workspace::target(from, n) else { return Ok(()) };
         if target == from {

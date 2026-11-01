@@ -70,6 +70,46 @@ module Sugoi
 
     # [V8]
     def move_to(n) = Sugoi.queue("move_to", Sugoi.workspace(n).to_s)
+
+    # [H3] The managed windows, in the window order; only in a hook.
+    def windows(workspace: nil)
+      return Sugoi.windows if workspace.nil?
+
+      n = Sugoi.workspace(workspace)
+      Sugoi.windows.select { |window| window.workspace == n }
+    end
+  end
+
+  # [H2] A managed window as a hook sees it: read-only; its methods act on it.
+  class Window
+    attr_reader :id, :class_name, :instance, :title, :type, :workspace
+
+    def initialize(id, class_name, instance, title, type, transient, workspace, floating)
+      @id = id
+      @class_name = class_name
+      @instance = instance
+      @title = title
+      @type = type.to_sym
+      @transient = transient
+      @workspace = workspace
+      @floating = floating
+      freeze
+    end
+
+    def transient? = @transient
+    def floating? = @floating
+    def float = act("float")
+    def tile = act("tile")
+    def size(width, height) = act("size", Integer(width).to_s, Integer(height).to_s)
+    def center = act("center")
+    def master = act("master")
+    def move_to(n) = act("move_to", Sugoi.workspace(n).to_s)
+    def close = act("close")
+    def inspect = "#<Sugoi::Window #{class_name} #{title.inspect} on #{workspace}>"
+
+    private
+
+    def act(*command) = Sugoi.queue("on", id.to_s, *command)
   end
 
   # The object a config file runs in.
@@ -86,6 +126,8 @@ module Sugoi
       @root_buttons = {}
       @layouts = %w[tile max float]
       @master = {}
+      @rules = []
+      @hooks = []
       @blocks = []
     end
 
@@ -121,12 +163,41 @@ module Sugoi
       @master[:width] = Float(width) unless width.nil?
     end
 
+    RULE_MATCHERS = %i[class instance title type transient].freeze
+    RULE_EFFECTS = %i[float size center on_top master workspace].freeze
+    TYPES = %w[normal dialog splash utility toolbar menu].freeze
+
+    # [U2] [U3] Matchers take a string or an array; types a symbol or an array.
+    def rule(**options)
+      unknown = options.keys - RULE_MATCHERS - RULE_EFFECTS
+      raise ArgumentError, "unknown rule option #{unknown.first.inspect}" unless unknown.empty?
+
+      strings = ->(value) { Array(value).map { |s| String(s) } }
+      flag = ->(value) { value.nil? ? nil : value == true }
+      size = options[:size]&.then do |dimensions|
+        width, height = Array(dimensions)
+        [Integer(width), Integer(height)]
+      end
+      @rules << [
+        strings.(options[:class]), strings.(options[:instance]), strings.(options[:title]),
+        Array(options[:type]).map { |type| Sugoi.one_of(type, TYPES) },
+        flag.(options[:transient]), flag.(options[:float]), size, options[:center] == true,
+        flag.(options[:on_top]), options[:master] == true,
+        options[:workspace]&.then { |n| Sugoi.workspace(n) }
+      ]
+    end
+
+    # [H1]
+    def on(event, &block)
+      @hooks << [Sugoi.one_of(event, %w[manage focus unmanage workspace]), register(event, block)]
+    end
+
     # What sugoi reads: [width, focused, normal, modkey, keys, buttons, root buttons,
-    # layouts, master side, master width].
+    # layouts, master side, master width, rules, hooks].
     def export
       [@border[:width], @border[:focused], @border[:normal], @modkey,
        @keys.to_a, @buttons.to_a, @root_buttons.to_a,
-       @layouts, @master[:side], @master[:width]]
+       @layouts, @master[:side], @master[:width], @rules, @hooks]
     end
 
     private
@@ -167,6 +238,23 @@ module Sugoi
     ensure
       @queue = nil
     end
+
+    # [H1] [H4] Runs hook block `index` with a window or a workspace number, and the
+    # managed windows: its commands, or an error message.
+    def run_hook(index, window, workspace, windows)
+      @queue = []
+      @windows = windows.map { |w| Window.new(*w) }.freeze
+      argument = window ? Window.new(*window) : workspace
+      Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call(argument) }
+      @queue
+    rescue ScriptError, StandardError => e
+      describe(e)
+    ensure
+      @queue = nil
+      @windows = nil
+    end
+
+    def windows = @windows || raise("windows are only known in a hook")
 
     def queue(*command)
       raise "actions only run inside a key or button block" unless @queue

@@ -7,8 +7,8 @@ use magnus::prelude::*;
 use magnus::{ArgList, RModule, RString, Ruby, TryConvert, Value};
 
 use crate::{
-    Binding, Border, Choice, Command, Direction, Goto, Layout, Master, Script, Settings, Side,
-    State,
+    Binding, Border, Choice, Command, Direction, Effects, Event, Goto, HookArg, Layout, Master,
+    Matcher, Rule, Script, Settings, Side, Snapshot, State, WindowCommand, WindowType,
 };
 
 pub struct RubyScript {
@@ -29,7 +29,55 @@ type Exported = (
     Vec<String>,
     Option<String>,
     Option<f32>,
+    Vec<RuleExport>,
+    Vec<(String, usize)>,
 );
+/// A rule as `Sugoi::Config#rule` exports it: class, instance, title, types, transient,
+/// float, size, center, on top, master, workspace.
+type RuleExport = (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Option<bool>,
+    Option<bool>,
+    Option<(u32, u32)>,
+    bool,
+    Option<bool>,
+    bool,
+    Option<u32>,
+);
+/// [H2] A window for `Sugoi.run_hook`: id, class, instance, title, type, transient,
+/// workspace, floating.
+type WindowExport = (u32, String, String, String, String, bool, u32, bool);
+
+fn window_export(s: &Snapshot) -> WindowExport {
+    let i = &s.info;
+    let kind = i.kind().name().to_owned();
+    (
+        s.id,
+        i.class.clone(),
+        i.instance.clone(),
+        i.title.clone(),
+        kind,
+        i.transient,
+        s.workspace,
+        s.floating,
+    )
+}
+
+fn rule(r: RuleExport) -> Result<Rule, String> {
+    let (class, instance, title, types, transient, float, size, center, on_top, master, workspace) =
+        r;
+    let types = types
+        .iter()
+        .map(|t| WindowType::from_name(t).ok_or_else(|| format!("bad window type {t:?}")))
+        .collect::<Result<_, _>>()?;
+    Ok(Rule {
+        matcher: Matcher { class, instance, title, types, transient },
+        effects: Effects { float, size, center, on_top, master, workspace },
+    })
+}
 
 impl RubyScript {
     /// Loads the DSL into the Ruby `ruby` proves is running on this thread.
@@ -58,8 +106,20 @@ impl Script for RubyScript {
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
-        let (width, focused, normal, modkey, keys, buttons, root_buttons, layouts, side, share) =
-            Exported::try_convert(value).map_err(|e| e.to_string())?;
+        let (
+            width,
+            focused,
+            normal,
+            modkey,
+            keys,
+            buttons,
+            root_buttons,
+            layouts,
+            side,
+            share,
+            rules,
+            hooks,
+        ) = Exported::try_convert(value).map_err(|e| e.to_string())?;
         let defaults = Border::default();
         let bind = |list: Vec<(String, usize)>| {
             list.into_iter()
@@ -76,6 +136,20 @@ impl Script for RubyScript {
             keys: bind(keys),
             buttons: bind(buttons),
             root_buttons: bind(root_buttons),
+            rules: rules.into_iter().map(rule).collect::<Result<_, _>>()?,
+            hooks: hooks
+                .into_iter()
+                .map(|(event, block)| {
+                    let event = match event.as_str() {
+                        "manage" => Event::Manage,
+                        "focus" => Event::Focus,
+                        "unmanage" => Event::Unmanage,
+                        "workspace" => Event::Workspace,
+                        other => return Err(format!("bad hook event {other:?}")),
+                    };
+                    Ok((event, block))
+                })
+                .collect::<Result<_, String>>()?,
             layouts: layouts.iter().map(|l| layout(l)).collect::<Result<_, _>>()?,
             master: Master {
                 side: match side.as_deref() {
@@ -97,6 +171,25 @@ impl Script for RubyScript {
 
     fn run(&mut self, block: usize) -> Result<Vec<Command>, String> {
         let value: Value = self.call("run", (block,))?;
+        if let Some(message) = RString::from_value(value) {
+            return Err(message.to_string().map_err(|e| e.to_string())?);
+        }
+        let commands = Vec::<Vec<String>>::try_convert(value).map_err(|e| e.to_string())?;
+        commands.iter().map(|c| command(c)).collect()
+    }
+
+    fn hook(
+        &mut self,
+        block: usize,
+        arg: &HookArg,
+        windows: &[Snapshot],
+    ) -> Result<Vec<Command>, String> {
+        let (window, workspace) = match arg {
+            HookArg::Window(s) => (Some(window_export(s)), None),
+            HookArg::Workspace(n) => (None, Some(*n)),
+        };
+        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
+        let value: Value = self.call("run_hook", (block, window, workspace, windows))?;
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
@@ -148,6 +241,23 @@ fn command(parts: &[String]) -> Result<Command, String> {
                 "back" => Goto::Back,
                 n => Goto::Number(n.parse().map_err(|_| format!("bad workspace {n:?}"))?),
             }),
+            ("on", [id, rest @ ..]) => {
+                let id = id.parse().map_err(|_| format!("bad window {id:?}"))?;
+                let number = |n: &String| n.parse().map_err(|_| format!("bad number {n:?}"));
+                Command::On(
+                    id,
+                    match rest {
+                        [a] if a == "float" => WindowCommand::Float(true),
+                        [a] if a == "tile" => WindowCommand::Float(false),
+                        [a, w, h] if a == "size" => WindowCommand::Size(number(w)?, number(h)?),
+                        [a] if a == "center" => WindowCommand::Center,
+                        [a] if a == "master" => WindowCommand::Master,
+                        [a, n] if a == "move_to" => WindowCommand::MoveTo(number(n)?),
+                        [a] if a == "close" => WindowCommand::Close,
+                        _ => return Err(format!("bad window command {rest:?}")),
+                    },
+                )
+            }
             ("move_to", [n]) => {
                 Command::MoveTo(n.parse().map_err(|_| format!("bad workspace {n:?}"))?)
             }
