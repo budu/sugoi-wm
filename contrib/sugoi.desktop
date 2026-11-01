@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=sugoi
+Comment=sugoi, an X11 window manager configured in Ruby
+Exec=/home/budu/projects/sugoi-wm/contrib/sugoi-session
+TryExec=/home/budu/projects/sugoi-wm/contrib/sugoi-session
+Type=Application
+DesktopNames=sugoi

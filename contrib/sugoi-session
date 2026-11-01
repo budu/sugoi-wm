@@ -1,7 +1,12 @@
 #!/bin/sh
 # An X session for sugoi: what the awesome config started (lxpolkit), the bar and the
-# notification daemon, then sugoi. From ~/.xinitrc: exec ~/projects/sugoi-wm/contrib/sugoi-session
+# notification daemon, then sugoi. GDM starts it through contrib/sugoi.desktop;
+# startx through ~/.xinitrc: exec ~/projects/sugoi-wm/contrib/sugoi-session
 # If sugoi cannot start (a Ruby upgrade, see contrib/sugoi-ruby.hook), awesome takes over.
+
+# GDM's session may not have cargo's binaries on PATH: sugoi, and sugoictl for the
+# config's confirmations.
+export PATH="$HOME/.cargo/bin:$PATH"
 dunst &
 lxpolkit &
 (sleep 1 && polybar sugoi) &
