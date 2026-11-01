@@ -235,7 +235,7 @@ module Sugoi
       @candidate = config
       config.export
     rescue ScriptError, StandardError => e
-      describe(e)
+      safely_describe(e)
     end
 
     # Makes the last loaded config the one blocks come from.
@@ -250,7 +250,7 @@ module Sugoi
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call }
       @queue
     rescue ScriptError, StandardError => e
-      describe(e)
+      safely_describe(e)
     ensure
       @queue = nil
     end
@@ -264,7 +264,7 @@ module Sugoi
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call(argument) }
       @queue
     rescue ScriptError, StandardError => e
-      describe(e)
+      safely_describe(e)
     ensure
       @queue = nil
       @windows = nil
@@ -279,7 +279,7 @@ module Sugoi
       inspected = Timeout.timeout(TIME_LIMIT) { Request.new.run(code).inspect }
       [inspected, @queue]
     rescue ScriptError, StandardError => e
-      describe(e)
+      safely_describe(e)
     ensure
       @queue = nil
       @windows = nil
@@ -334,6 +334,13 @@ module Sugoi
     end
 
     private
+
+    # An error's message is user code too (`def message = loop {}`): within the limit.
+    def safely_describe(error)
+      Timeout.timeout(TIME_LIMIT) { describe(error) }
+    rescue Exception # rubocop:disable Lint/RescueException
+      "an error whose message could not be read"
+    end
 
     # The message on one line, with the config line it comes from.
     def describe(error)

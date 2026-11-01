@@ -21,7 +21,8 @@ the identifiers in brackets.
   `_NET_WM_STRUT`, reserves screen edges; the work area ([Y1]) is the screen less what
   every dock reserves (a strut past the screen leaves at least a pixel), and the root's
   `_NET_WORKAREA` gives it for each workspace. It follows docks mapping, unmapping and
-  changing their struts. Docks stack above every managed window but a fullscreen one.
+  changing their struts. Docks stack above every managed window but a fullscreen one,
+  however they map or ask to be restacked.
 - **[E5] Window states.** `_NET_WM_STATE` lists, for each managed window,
   `_NET_WM_STATE_FULLSCREEN`, `_NET_WM_STATE_ABOVE` (on top), `_NET_WM_STATE_HIDDEN`
   (minimized or on another workspace), and `_NET_WM_STATE_MAXIMIZED_VERT` and `_HORZ`
@@ -38,8 +39,8 @@ the identifiers in brackets.
   an app's fullscreen (F11) works this way. Other states are ignored.
 - **[E8] Activation.** `_NET_ACTIVE_WINDOW` from a pager or the user (source 2) for a
   managed window switches to its workspace, restores it if minimized, and focuses and
-  raises it. From an app (source 1, or 0 from old clients) it only focuses a window
-  already shown: an app cannot pull the user to another workspace.
+  raises it. From an app (source 1, or 0 from old clients) it does so only for a window
+  on the current workspace: an app cannot pull the user to another workspace.
 - **[E9] Desktops.** `_NET_CURRENT_DESKTOP` with n switches to workspace n + 1, as the
   numbers 11 to 30 do ([V4]), including from a bar's clicks and scrolls;
   `_NET_WM_DESKTOP` moves a window there.
@@ -59,4 +60,4 @@ the identifiers in brackets.
 - **[I4] Many clients.** Requests from several clients are served one at a time, in
   the event loop, which neither waits on a client's request nor on its reading the
   reply; a client that sends nothing or reads nothing for 1 s is dropped. A request's
-  `inspect` is within the 1 s limit too.
+  `inspect`, and an error's message, are within the 1 s limit too.

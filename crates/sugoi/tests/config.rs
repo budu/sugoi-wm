@@ -872,3 +872,14 @@ fn i4_an_unread_reply_holds_nobody_up() {
     assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
     drop(lazy);
 }
+
+/// [I2] [R2] An error whose message never ends is reported, not waited on.
+#[test]
+fn i2_a_looping_error_message_is_stopped() {
+    let session = Session::with_config("");
+    let path = socket(&session);
+    let code = "raise Class.new(StandardError) { def message = loop {} }";
+    let reply = sugoictl::request(&path, code).unwrap();
+    assert_eq!(reply, sugoictl::Reply::Error("an error whose message could not be read".into()));
+    assert_eq!(sugoictl::request(&path, "1 + 1").unwrap(), sugoictl::Reply::Ok("2".into()));
+}

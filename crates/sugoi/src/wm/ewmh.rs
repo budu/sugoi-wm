@@ -230,17 +230,8 @@ impl Wm {
         action: u32,
         atoms: [Atom; 2],
     ) -> Result<(), Error> {
-        let a = &self.atoms;
         let mut states: Vec<State> = Vec::new();
-        for atom in atoms.into_iter().filter(|&atom| atom != NONE) {
-            let state = match atom {
-                t if t == a._NET_WM_STATE_FULLSCREEN => State::Fullscreen,
-                t if t == a._NET_WM_STATE_ABOVE => State::OnTop,
-                t if t == a._NET_WM_STATE_MAXIMIZED_VERT || t == a._NET_WM_STATE_MAXIMIZED_HORZ => {
-                    State::Maximized
-                }
-                _ => continue,
-            };
+        for state in atoms.into_iter().filter_map(|atom| self.net_state(atom)) {
             if !states.contains(&state) {
                 states.push(state);
             }
@@ -257,18 +248,26 @@ impl Wm {
         self.arrange()
     }
 
+    /// [E5] [E7] The state an EWMH state atom names, of those sugoi has.
+    pub(super) fn net_state(&self, atom: Atom) -> Option<State> {
+        let a = &self.atoms;
+        Some(match atom {
+            t if t == a._NET_WM_STATE_FULLSCREEN => State::Fullscreen,
+            t if t == a._NET_WM_STATE_ABOVE => State::OnTop,
+            t if t == a._NET_WM_STATE_MAXIMIZED_VERT || t == a._NET_WM_STATE_MAXIMIZED_HORZ => {
+                State::Maximized
+            }
+            _ => return None,
+        })
+    }
+
     /// [E8] A pager or the user (source 2) gets the window wherever it is; an app (1, or
-    /// 0 from old clients) only focuses a window already shown, so it cannot pull the
-    /// user to another workspace.
+    /// 0 from old clients) only one on the current workspace, restored if minimized, so
+    /// it cannot pull the user to another workspace.
     fn activation_request(&mut self, window: Window, source: u32) -> Result<(), Error> {
         const PAGER: u32 = 2;
-        if source == PAGER {
-            self.activate(window)
-        } else if self.visible(window) {
-            self.focus(window, true)
-        } else {
-            Ok(())
-        }
+        let here = self.clients[&window].workspace == self.current;
+        if source == PAGER || here { self.activate(window) } else { Ok(()) }
     }
 
     /// [E8] Shows `window` wherever it is, and focuses it.
@@ -290,7 +289,12 @@ impl Wm {
         if map {
             self.conn.map_window(window)?;
         }
-        self.update_workarea()
+        self.update_workarea()?;
+        // X maps it on top: below a fullscreen window it goes, whatever its strut.
+        if self.restack()? {
+            self.ignore_crossings()?;
+        }
+        Ok(())
     }
 
     pub(super) fn remove_dock(&mut self, window: Window) -> Result<(), Error> {

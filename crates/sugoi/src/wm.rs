@@ -948,17 +948,8 @@ impl Wm {
         let initial: Vec<Atom> = vanished(initial.reply())?
             .and_then(|r| r.value32().map(|v| v.collect()))
             .unwrap_or_default();
-        for atom in initial {
-            let state = match atom {
-                a if a == self.atoms._NET_WM_STATE_FULLSCREEN => crate::State::Fullscreen,
-                a if a == self.atoms._NET_WM_STATE_ABOVE => crate::State::OnTop,
-                a if a == self.atoms._NET_WM_STATE_MAXIMIZED_VERT
-                    || a == self.atoms._NET_WM_STATE_MAXIMIZED_HORZ =>
-                {
-                    crate::State::Maximized
-                }
-                _ => continue,
-            };
+        let states: Vec<_> = initial.into_iter().filter_map(|atom| self.net_state(atom)).collect();
+        for state in states {
             self.set_flag(window, state, Some(true));
         }
         // [U6] [U7] Rules before the window shows; the manage hooks for new windows.
@@ -1024,6 +1015,11 @@ impl Wm {
     fn configure_request(&mut self, e: &ConfigureRequestEvent) -> Result<(), Error> {
         let aux = ConfigureWindowAux::from_configure_request(e);
         let Some(client) = self.clients.get(&e.window) else {
+            // [E4] A dock moves and resizes as it asks, but stays where sugoi stacks it.
+            let mut aux = aux;
+            if self.docks.contains_key(&e.window) {
+                (aux.sibling, aux.stack_mode) = (None, None);
+            }
             self.conn.configure_window(e.window, &aux)?;
             return Ok(());
         };

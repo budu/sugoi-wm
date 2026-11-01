@@ -238,13 +238,14 @@ impl Wm {
     }
 
     /// [W3] [W4] [W5] [E7] Sets a state, or toggles it with `None`; the caller arranges.
+    /// Floating goes through `float`, which keeps where the window shows.
     pub(super) fn set_flag(&mut self, window: Window, state: State, value: Option<bool>) {
         let client = self.clients.get_mut(&window).expect("managed");
         let flag = match state {
             State::Maximized => &mut client.maximized,
             State::Fullscreen => &mut client.fullscreen,
             State::OnTop => &mut client.on_top,
-            State::Floating => &mut client.floating,
+            State::Floating => unreachable!("floating goes through float()"),
         };
         *flag = value.unwrap_or(!*flag);
     }

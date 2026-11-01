@@ -116,11 +116,14 @@ impl Wm {
                         }
                     }
                     Err(e) if e.kind() == ErrorKind::WouldBlock => break,
-                    Err(e) => {
+                    // Out of descriptors: the listener stays readable, so rest it.
+                    Err(e) if matches!(e.raw_os_error(), Some(23 | 24)) => {
                         warn!("IPC accept: {e}");
                         server.paused_until = Some(now + DEADLINE);
                         break;
                     }
+                    // A connection that failed alone (aborted, reset): take the next.
+                    Err(e) => warn!("IPC accept: {e}"),
                 }
             }
         }
@@ -157,7 +160,11 @@ impl Wm {
             if let Some((reply, written)) = &mut client.reply {
                 while *written < reply.len() {
                     match client.stream.write(&reply[*written..]) {
-                        Ok(n) => *written += n,
+                        // [I4] The limit is on idle time: progress extends it.
+                        Ok(n) => {
+                            *written += n;
+                            client.deadline = now + DEADLINE;
+                        }
                         Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                         Err(_) => return false,
                     }

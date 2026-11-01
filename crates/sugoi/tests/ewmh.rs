@@ -272,3 +272,27 @@ fn e8_an_app_cannot_switch_the_workspace() {
     assert_eq!(values(&session, session.root, "_NET_CURRENT_DESKTOP"), [3]);
     assert!(!session.viewable(a.window));
 }
+
+/// [E4] A dock mapped later, without a new strut, still goes below fullscreen.
+#[test]
+fn e4_a_dock_mapped_later_stays_below_fullscreen() {
+    let session = session();
+    let a = app(&session);
+    assert!(session.send(Command::Toggle(State::Fullscreen)));
+    eventually("fullscreen", || session.geometry(a.window).unwrap().border_width == 0);
+    let bar = dock(&session, 0);
+    eventually("a above the bar", || session.above(a.window, bar.window));
+}
+
+/// [E8] An app may still bring back its own minimized window, here.
+#[test]
+fn e8_an_app_restores_its_window_on_this_workspace() {
+    let session = session();
+    let a = app(&session);
+    assert!(session.send(Command::Minimize));
+    eventually("minimized", || !session.viewable(a.window));
+    message(&session, a.window, "_NET_ACTIVE_WINDOW", [1, 0, 0, 0, 0]);
+    eventually("restored and focused", || {
+        session.viewable(a.window) && session.focus() == a.window
+    });
+}
