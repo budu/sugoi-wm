@@ -23,7 +23,7 @@ hooks (M5), spawn limits (M6).
 - **[L6] Load time limit.** A file still loading after 5 s is stopped, and the load
   fails ([L4]).
 - **[L7] Taken chords.** A key chord another program has grabbed cannot be bound; sugoi
-  names it with `notify-send`, and the other chords work.
+  names it with `notify-send` when the config loads, and the other chords work.
 
 ## DSL
 

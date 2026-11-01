@@ -3,8 +3,21 @@
 
 require "timeout"
 
-# [C3] sugoi handles these signals itself; Ruby's own handlers would only queue them.
+# [C3] sugoi handles these signals itself; Ruby's own handlers would only queue them,
+# so a config may not trap them either.
 %w[TERM INT HUP].each { |signal| trap(signal, "SYSTEM_DEFAULT") }
+
+module Sugoi
+  module SignalGuard
+    def trap(signal, *args, &block)
+      name = signal.is_a?(Integer) ? Signal.signame(signal) : signal.to_s.delete_prefix("SIG")
+      raise ArgumentError, "sugoi handles SIG#{name}" if %w[TERM INT HUP].include?(name)
+
+      super
+    end
+  end
+end
+[Kernel, Kernel.singleton_class, Signal.singleton_class].each { |m| m.prepend(Sugoi::SignalGuard) }
 
 module Sugoi
   # [R2] Seconds a block may run.

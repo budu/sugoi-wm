@@ -104,6 +104,23 @@ impl Wm {
     /// Connects to `display` (or `$DISPLAY`), becomes its WM, loads the settings from
     /// `script` and adopts the windows.
     pub fn new(display: Option<&str>, script: Box<dyn Script>) -> Result<Wm, Error> {
+        let mut wm = Wm::connect(display, script)?;
+        wm.start()?;
+        Ok(wm)
+    }
+
+    /// Loads the settings and adopts the windows; [`Wm::new`] without the connection.
+    pub fn start(&mut self) -> Result<(), Error> {
+        self.load()?;
+        self.adopt()?;
+        self.conn.flush()?;
+        info!("managing {} windows", self.clients.len());
+        Ok(())
+    }
+
+    /// Connects to `display` (or `$DISPLAY`) and becomes its WM ([S1]), without loading
+    /// settings or touching windows: signal handlers can go in before [`Wm::start`].
+    pub fn connect(display: Option<&str>, script: Box<dyn Script>) -> Result<Wm, Error> {
         let (conn, screen) = x11rb::connect(display)?;
         let root = conn.setup().roots[screen].root;
         let atoms = Atoms::new(&conn)?.reply().map_err(lost)?;
@@ -130,7 +147,7 @@ impl Wm {
         let (wake, wake_writer) = UnixStream::pair()?;
         wake.set_nonblocking(true)?;
         let handle = Handle { commands: sender, wake: Arc::new(wake_writer) };
-        let mut wm = Wm {
+        Ok(Wm {
             conn,
             root,
             atoms,
@@ -151,12 +168,7 @@ impl Wm {
             commands,
             wake,
             handle,
-        };
-        wm.load()?;
-        wm.adopt()?;
-        wm.conn.flush()?;
-        info!("managing {} windows", wm.clients.len());
-        Ok(wm)
+        })
     }
 
     pub fn handle(&self) -> Handle {
@@ -188,7 +200,7 @@ impl Wm {
                     }
                     Exit::Restart => {
                         restart();
-                        self.rebind()?;
+                        self.regrab(true)?;
                     }
                 }
             }
@@ -312,22 +324,7 @@ impl Wm {
         self.buttons = bindings.buttons;
         self.root_buttons = bindings.root_buttons;
         self.border = bindings.border;
-        self.rebind()
-    }
-
-    /// Grabs every key and button chord again, and redraws every border.
-    fn rebind(&mut self) -> Result<(), Error> {
-        self.regrab()?;
-        let windows: Vec<Window> = self.clients.keys().copied().collect();
-        for window in windows {
-            let width = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
-            self.conn.configure_window(window, &width)?;
-            let color =
-                if self.focused == Some(window) { self.border.focused } else { self.border.normal };
-            let color = ChangeWindowAttributesAux::new().border_pixel(color);
-            self.conn.change_window_attributes(window, &color)?;
-        }
-        Ok(())
+        self.regrab(true)
     }
 
     /// [R4] The lock modifiers a chord matches with: none, Caps Lock, Num Lock, both.
@@ -352,19 +349,29 @@ impl Wm {
         u16::from(state) & u16::from(mods) & !u16::from(self.keyboard.num_lock)
     }
 
-    /// [R3] Grabs the key chords and every window's button chords again.
-    fn regrab(&mut self) -> Result<(), Error> {
-        self.grab_keys()?;
+    /// Grabs the key chords and every window's button chords again; after a load, also
+    /// checks the key grabs ([L7]) and redraws every border ([L5]). A keymap change
+    /// ([R3]) only grabs again.
+    fn regrab(&mut self, loaded: bool) -> Result<(), Error> {
+        self.grab_keys(loaded)?;
         for &window in self.clients.keys() {
             self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
             self.grab_buttons(window)?;
+            if loaded {
+                let width = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
+                self.conn.configure_window(window, &width)?;
+                let focused = self.focused == Some(window);
+                let color = if focused { self.border.focused } else { self.border.normal };
+                let color = ChangeWindowAttributesAux::new().border_pixel(color);
+                self.conn.change_window_attributes(window, &color)?;
+            }
         }
         Ok(())
     }
 
-    /// [D3] [R3] Binds the key chords to the keycodes of the current mapping. [L7] A
-    /// chord another client holds is reported; the others still work.
-    fn grab_keys(&mut self) -> Result<(), Error> {
+    /// [D3] [R3] Binds the key chords to the keycodes of the current mapping. With
+    /// `check`, a chord another client holds is reported ([L7]); the others still work.
+    fn grab_keys(&mut self, check: bool) -> Result<(), Error> {
         self.conn.ungrab_key(Grab::ANY, self.root, ModMask::ANY)?;
         self.keys.clear();
         let locks = self.locks();
@@ -384,14 +391,21 @@ impl Wm {
                 self.keys.insert((u16::from(*mods), code), action.clone());
             }
         }
+        if !check {
+            // Errors still arrive as events, logged at debug level ([M5]).
+            return Ok(());
+        }
         let mut taken: Vec<&str> = Vec::new();
         for (chord, cookie) in grabs {
             match cookie.check() {
                 Ok(()) => {}
-                Err(ReplyError::X11Error(_)) => {
+                Err(ReplyError::X11Error(e)) if e.error_kind == ErrorKind::Access => {
                     if !taken.contains(&chord.as_str()) {
                         taken.push(chord);
                     }
+                }
+                Err(ReplyError::X11Error(e)) => {
+                    report(&format!("cannot bind {chord}: {:?}", e.error_kind));
                 }
                 Err(ReplyError::ConnectionError(e)) => return Err(e.into()),
             }
@@ -515,7 +529,7 @@ impl Wm {
             // [R3]
             Event::MappingNotify(e) if e.request != Mapping::POINTER => {
                 self.keyboard = Keyboard::read(&self.conn)?;
-                self.regrab()?;
+                self.regrab(false)?;
             }
             Event::PropertyNotify(e) => {
                 let hints: Atom = AtomEnum::WM_HINTS.into();

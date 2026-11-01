@@ -75,4 +75,5 @@ library API (`Handle`), which the tests use.
 - **[C1] Close focused.** Closes the focused window ([K1]); does nothing without one.
 - **[C2] Quit.** sugoi exits with status 0. Managed windows stay mapped and get their
   original border width back, so a WM started next adopts them as they were.
-- **[C3] Signals.** SIGTERM, SIGINT and SIGHUP quit as [C2] does.
+- **[C3] Signals.** SIGTERM, SIGINT and SIGHUP quit as [C2] does, from before the
+  settings load; the config cannot `trap` them.

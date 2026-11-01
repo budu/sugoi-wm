@@ -1,7 +1,6 @@
 //! Starting programs ([P1]) and notifications ([L4], [R1]).
 
 use std::process::{Command, Stdio};
-use std::thread;
 
 use log::{info, warn};
 
@@ -19,17 +18,26 @@ pub fn notify(message: &str) {
 }
 
 /// Runs `argv` through `setsid -f`, so the program is never sugoi's child: it is reaped
-/// across a restart, and gets no signal sent to sugoi's group. A thread reaps `setsid`,
-/// which exits at once.
+/// across a restart, and gets no signal sent to sugoi's group. `setsid` forks and exits
+/// at once, so waiting for it does not block.
 fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
-    let mut command = Command::new("setsid");
-    command.arg("-f").args(argv).stdin(Stdio::null());
-    match command.spawn() {
-        Ok(mut child) => {
-            thread::spawn(move || child.wait());
-        }
-        Err(e) => warn!("cannot start {command:?}: {e}"),
+    let mut argv = argv.into_iter();
+    let Some(program) = argv.next() else { return };
+    // `setsid -f` exits 0 even when the program is missing, so look first.
+    if !on_path(program) {
+        warn!("cannot start {program}: not found on PATH");
+        return;
     }
+    let mut command = Command::new("setsid");
+    command.arg("-f").arg(program).args(argv).stdin(Stdio::null());
+    if let Err(e) = command.spawn().and_then(|mut setsid| setsid.wait()) {
+        warn!("cannot start {program}: {e}");
+    }
+}
+
+fn on_path(program: &str) -> bool {
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
 }
 
 /// Keeps a unit name to letters, digits and `_`: a `-` would nest the slice.

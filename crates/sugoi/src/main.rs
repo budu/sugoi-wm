@@ -35,9 +35,12 @@ fn main() -> ExitCode {
     let ruby = magnus::Ruby::get().expect("Ruby runs on this thread");
     let result = RubyScript::new(&ruby, path)
         .map_err(|e| format!("cannot load the config DSL: {e}"))
-        .and_then(|script| Wm::new(None, Box::new(script)).map_err(|e| e.to_string()))
-        .and_then(|wm| wm.quit_on_signals().map(|()| wm).map_err(|e| e.to_string()))
-        .and_then(|wm| wm.run().map_err(|e| e.to_string()));
+        .and_then(|script| Wm::connect(None, Box::new(script)).map_err(|e| e.to_string()))
+        .and_then(|mut wm| {
+            // Before the settings and windows: a signal must not kill sugoi midway.
+            wm.quit_on_signals().and_then(|()| wm.start()).map_err(|e| e.to_string())?;
+            wm.run().map_err(|e| e.to_string())
+        });
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

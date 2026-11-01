@@ -414,6 +414,7 @@ fn l6_a_config_still_loading_after_5_s_is_stopped() {
     let limit = std::time::Duration::from_secs(10);
     eventually_within(limit, "managed", || session.wm_state(app.window).is_some());
     assert_eq!(session.geometry(app.window).unwrap().border_width, 3);
+    eventually("notified", || !notifications(&mut session).is_empty());
     let notes = notifications(&mut session);
     assert!(notes[0].contains("execution expired"), "{notes:?}");
 }
@@ -478,4 +479,13 @@ fn c3_sigterm_quits_like_quit() {
     eventually("exited", || session.binary().status().is_some());
     assert!(session.binary().status().unwrap().success());
     assert_eq!(session.geometry(app.window).unwrap().border_width, 0);
+}
+
+/// [C3]
+#[test]
+fn c3_a_config_cannot_trap_the_quit_signals() {
+    let mut session = Session::with_config("trap(\"TERM\") {}\n");
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].ends_with("config.rb:1: sugoi handles SIGTERM (ArgumentError)"), "{notes:?}");
 }
