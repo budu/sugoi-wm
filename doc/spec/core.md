@@ -28,9 +28,10 @@ border is the client window's own X border, and windows stay usable if sugoi exi
 - **[M2] Override-redirect.** Override-redirect windows (menus, tooltips, popups) are
   never managed, focused or given a border.
 - **[M3] Configure.** A `ConfigureRequest` from an unmanaged window is applied as
-  asked. From a managed window, position, size and stacking are applied as asked
-  until layouts exist (M3); the border width stays sugoi's. When nothing changes,
-  sugoi sends a synthetic `ConfigureNotify` with the current geometry (ICCCM 4.1.5).
+  asked. From a floating managed window, position and size are applied as asked;
+  a tiled one keeps its cell ([Y9]). The border width and stacking stay sugoi's. When
+  nothing changes, sugoi sends a synthetic `ConfigureNotify` with the current geometry
+  (ICCCM 4.1.5).
 - **[M4] Unmanage.** A managed window stops being managed when it is destroyed or
   unmapped by its client. An unmapped window may be reused (a tray icon), so sugoi
   deletes its `WM_STATE`, releases its button grabs and event selection, and restores
@@ -55,7 +56,7 @@ border is the client window's own X border, and windows stay usable if sugoi exi
 - **[F5] Focus history.** sugoi keeps the managed windows in focus order. When the
   focused window is unmanaged, the most recently focused remaining window gets the
   focus; with none left, the focus goes to the root (`PointerRoot`). If the unmap leaves
-  the pointer over another managed window, the crossing focuses that window ([F2]): the
+  the pointer over another managed window, that window gets the focus ([Z2]): the
   pointer wins over the history, as in awesome.
 - **[F7] Malformed hints.** A `WM_HINTS` property sugoi cannot parse counts as absent.
 - **[F6] Borders.** The focused window's border has the focused color, every other
