@@ -77,7 +77,11 @@ pub struct Settings {
 impl Default for Settings {
     /// [L3]
     fn default() -> Self {
-        let xterm = Command::Spawn { name: "xterm".into(), argv: vec!["xterm".into()] };
+        let xterm = Command::Spawn {
+            name: "xterm".into(),
+            argv: vec!["xterm".into()],
+            limits: Limits::default(),
+        };
         Settings {
             border: Border::default(),
             modkey: "Mod4".into(),
@@ -154,7 +158,9 @@ pub enum Command {
     /// [C1]
     CloseFocused,
     /// [P1]
-    Spawn { name: String, argv: Vec<String> },
+    Spawn { name: String, argv: Vec<String>, limits: Limits },
+    /// [A4]
+    Kill,
     /// [L5]
     Reload,
     /// [D5]
@@ -197,6 +203,17 @@ pub enum WindowCommand {
     Master,
     MoveTo(u32),
     Close,
+    /// [A4]
+    Kill,
+}
+
+/// [A1] Resource limits for a spawned app's scope; checked by the config.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Limits {
+    /// `MemoryMax=`: bytes, or a number with K, M, G or T.
+    pub memory: Option<String>,
+    /// `CPUWeight=`: 1 to 10000.
+    pub cpu_weight: Option<u32>,
 }
 
 /// [U1]
@@ -237,6 +254,8 @@ pub struct Info {
     pub title: String,
     pub kind: Option<WindowType>,
     pub transient: bool,
+    /// [A2] `_NET_WM_PID`, when `WM_CLIENT_MACHINE` is this host.
+    pub pid: Option<u32>,
 }
 
 impl Info {
@@ -327,6 +346,8 @@ pub enum Event {
 pub struct Snapshot {
     pub id: u32,
     pub info: Info,
+    /// [A3] [A5]
+    pub unit: Option<String>,
     /// 1 to 30.
     pub workspace: u32,
     pub floating: bool,

@@ -7,8 +7,8 @@ use magnus::prelude::*;
 use magnus::{ArgList, RModule, RString, Ruby, TryConvert, Value};
 
 use crate::{
-    Binding, Border, Choice, Command, Direction, Effects, Event, Goto, HookArg, Layout, Master,
-    Matcher, Rule, Script, Settings, Side, Snapshot, State, WindowCommand, WindowType,
+    Binding, Border, Choice, Command, Direction, Effects, Event, Goto, HookArg, Layout, Limits,
+    Master, Matcher, Rule, Script, Settings, Side, Snapshot, State, WindowCommand, WindowType,
 };
 
 pub struct RubyScript {
@@ -47,9 +47,10 @@ type RuleExport = (
     bool,
     Option<u32>,
 );
-/// [H2] A window for `Sugoi.run_hook`: id, class, instance, title, type, transient,
-/// workspace, floating.
-type WindowExport = (u32, String, String, String, String, bool, u32, bool);
+/// [H2] [A5] A window for `Sugoi.run_hook`: id, class, instance, title, type, transient,
+/// workspace, floating, pid, unit.
+type WindowExport =
+    (u32, String, String, String, String, bool, u32, bool, Option<u32>, Option<String>);
 
 fn window_export(s: &Snapshot) -> WindowExport {
     let i = &s.info;
@@ -63,6 +64,8 @@ fn window_export(s: &Snapshot) -> WindowExport {
         i.transient,
         s.workspace,
         s.floating,
+        i.pid,
+        s.unit.clone(),
     )
 }
 
@@ -213,9 +216,14 @@ fn command(parts: &[String]) -> Result<Command, String> {
             ("reload", []) => Command::Reload,
             ("restart", []) => Command::Restart,
             ("quit", []) => Command::Quit,
-            ("spawn", [name, argv @ ..]) if !argv.is_empty() => {
-                Command::Spawn { name: name.clone(), argv: argv.to_vec() }
+            ("spawn", [name, memory, weight, argv @ ..]) if !argv.is_empty() => {
+                let some = |s: &String| (!s.is_empty()).then(|| s.clone());
+                let cpu_weight = some(weight).map(|w| w.parse()).transpose();
+                let cpu_weight = cpu_weight.map_err(|_| format!("bad cpu_weight {weight:?}"))?;
+                let limits = Limits { memory: some(memory), cpu_weight };
+                Command::Spawn { name: name.clone(), argv: argv.to_vec(), limits }
             }
+            ("kill", []) => Command::Kill,
             ("layout", [choice]) => Command::Layout(match choice.as_str() {
                 "next" => Choice::Next,
                 "previous" => Choice::Previous,
@@ -254,6 +262,7 @@ fn command(parts: &[String]) -> Result<Command, String> {
                         [a] if a == "master" => WindowCommand::Master,
                         [a, n] if a == "move_to" => WindowCommand::MoveTo(number(n)?),
                         [a] if a == "close" => WindowCommand::Close,
+                        [a] if a == "kill" => WindowCommand::Kill,
                         _ => return Err(format!("bad window command {rest:?}")),
                     },
                 )

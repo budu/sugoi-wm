@@ -4,12 +4,32 @@ use std::process::{Command, Stdio};
 
 use log::{info, warn};
 
-/// [P1] Starts `argv` in its own systemd scope under `app-<name>.slice`.
-pub fn spawn(name: &str, argv: &[String]) {
-    info!("spawn {name}: {argv:?}");
+use crate::Limits;
+
+/// [P1] [A1] Starts `argv` in its own systemd scope under `app-<name>.slice`.
+pub fn spawn(name: &str, argv: &[String], limits: &Limits) {
+    info!("spawn {name}: {argv:?} {limits:?}");
     let slice = format!("--slice=app-{}.slice", unit_name(name));
-    let systemd_run = ["systemd-run", "--user", "--scope", "--collect", "--quiet", &slice, "--"];
-    start(systemd_run.iter().copied().chain(argv.iter().map(String::as_str)));
+    let mut command: Vec<String> = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    command.push(slice);
+    if let Some(memory) = &limits.memory {
+        command.extend(["-p".into(), format!("MemoryMax={memory}")]);
+    }
+    if let Some(weight) = limits.cpu_weight {
+        command.extend(["-p".into(), format!("CPUWeight={weight}")]);
+    }
+    command.push("--".into());
+    command.extend(argv.iter().cloned());
+    start(command.iter().map(String::as_str));
+}
+
+/// [A4] Stops a systemd user unit, with every process in it.
+pub fn stop_unit(unit: &str) {
+    info!("stop {unit}");
+    start(["systemctl", "--user", "stop", unit]);
 }
 
 /// Shows `message` through the notification daemon (dunst), if there is one.

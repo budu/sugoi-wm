@@ -1,5 +1,6 @@
 //! The window manager: X connection, managed windows, focus and the event loop.
 
+mod apps;
 mod desks;
 mod place;
 mod rules;
@@ -52,6 +53,7 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE_UTILITY,
         _NET_WM_WINDOW_TYPE_TOOLBAR,
         _NET_WM_WINDOW_TYPE_MENU,
+        _NET_WM_PID,
     }
 }
 
@@ -138,6 +140,10 @@ pub struct Wm {
     later_hooks: VecDeque<(HookEvent, HookArg)>,
     /// How many configs have loaded, so a hook's `reload` stops its event's hooks.
     loads: u64,
+    /// [A2] This host's name.
+    host: String,
+    /// [A4] The cgroup sugoi itself runs in, whose unit `kill` never stops.
+    own_cgroup: Option<String>,
     /// [Y7]
     layouts: Vec<Layout>,
     /// [V3] Each workspace's layout and master column.
@@ -239,6 +245,8 @@ impl Wm {
             in_hook: false,
             later_hooks: VecDeque::new(),
             loads: 0,
+            host: apps::host(),
+            own_cgroup: apps::cgroup("self"),
             layouts: vec![Layout::Tile],
             desks: vec![
                 Desk { layout: Layout::Tile, master: Master::default() };
@@ -357,7 +365,12 @@ impl Wm {
                     self.close(window)?;
                 }
             }
-            Command::Spawn { name, argv } => spawn(&name, &argv),
+            Command::Spawn { name, argv, limits } => spawn(&name, &argv, &limits),
+            Command::Kill => {
+                if let Some(window) = self.focused {
+                    self.kill(window)?;
+                }
+            }
             Command::Reload => self.load()?,
             Command::Restart => self.exit = Some(Exit::Restart),
             Command::Quit => self.exit = Some(Exit::Quit),
@@ -988,7 +1001,7 @@ impl Wm {
     }
 
     /// [K1]
-    fn close(&mut self, window: Window) -> Result<(), Error> {
+    pub(super) fn close(&mut self, window: Window) -> Result<(), Error> {
         let deletes = self.clients.get(&window).is_some_and(|c| c.hints.delete_window);
         if deletes {
             self.send_protocol(window, self.atoms.WM_DELETE_WINDOW)?;

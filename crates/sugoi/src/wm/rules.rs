@@ -15,6 +15,8 @@ pub(super) struct InfoCookies<'c> {
     name: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     kind: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     transient: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
+    pid: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
+    machine: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
 }
 
 impl Wm {
@@ -38,6 +40,8 @@ impl Wm {
             name: get(AtomEnum::WM_NAME.into(), AtomEnum::ANY)?,
             kind: get(a._NET_WM_WINDOW_TYPE, AtomEnum::ATOM)?,
             transient: get(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)?,
+            pid: get(a._NET_WM_PID, AtomEnum::CARDINAL)?,
+            machine: get(AtomEnum::WM_CLIENT_MACHINE.into(), AtomEnum::STRING)?,
         })
     }
 
@@ -55,12 +59,17 @@ impl Wm {
             .and_then(|r| r.value32().map(|v| v.collect()))
             .unwrap_or_default();
         let transient = vanished(cookies.transient.reply())?.is_some_and(|r| r.value_len > 0);
+        // [A2] A process ID counts only on this host.
+        let pid = vanished(cookies.pid.reply())?.and_then(|r| r.value32()?.next());
+        let machine = vanished(cookies.machine.reply())?.map(|r| self.decode(&r));
+        let pid = pid.filter(|_| machine.as_deref() == Some(self.host.as_str()));
         Ok(Info {
             class,
             instance,
             title,
             kind: types.iter().find_map(|&t| self.window_type(t)),
             transient,
+            pid,
         })
     }
 
@@ -158,6 +167,7 @@ impl Wm {
         Snapshot {
             id: window,
             info: c.info.clone(),
+            unit: self.unit_of(window),
             workspace: c.workspace as u32 + 1,
             floating: c.floating || c.maximized || c.fullscreen || !self.tiled_layout(window),
         }
@@ -279,6 +289,7 @@ impl Wm {
             }
             WindowCommand::MoveTo(n) => return self.move_window(window, n),
             WindowCommand::Close => return self.close(window),
+            WindowCommand::Kill => return self.kill(window),
         }
         self.arrange()
     }

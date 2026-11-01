@@ -34,12 +34,17 @@ module Sugoi
     def restart = Sugoi.queue("restart")
     def quit = Sugoi.queue("quit")
 
-    def spawn(*argv, name: nil)
+    # [P1] [A1]
+    def spawn(*argv, name: nil, memory: nil, cpu_weight: nil)
       argv = argv.map { |arg| String(arg) }
       raise ArgumentError, "spawn needs a program" if argv.empty?
 
-      Sugoi.queue("spawn", name.nil? ? File.basename(argv.first) : String(name), *argv)
+      name = name.nil? ? File.basename(argv.first) : String(name)
+      Sugoi.queue("spawn", name, Sugoi.memory(memory), Sugoi.cpu_weight(cpu_weight), *argv)
     end
+
+    # [A4]
+    def kill = Sugoi.queue("kill")
 
     def sh(command) = spawn("sh", "-c", String(command), name: "sh")
 
@@ -82,9 +87,11 @@ module Sugoi
 
   # [H2] A managed window as a hook sees it: read-only; its methods act on it.
   class Window
-    attr_reader :id, :class_name, :instance, :title, :type, :workspace
+    attr_reader :id, :class_name, :instance, :title, :type, :workspace, :pid, :unit
 
-    def initialize(id, class_name, instance, title, type, transient, workspace, floating)
+    def initialize(id, class_name, instance, title, type, transient, workspace, floating, pid, unit)
+      @pid = pid
+      @unit = unit
       @id = id
       @class_name = class_name
       @instance = instance
@@ -105,6 +112,7 @@ module Sugoi
     def master = act("master")
     def move_to(n) = act("move_to", Sugoi.workspace(n).to_s)
     def close = act("close")
+    def kill = act("kill")
     def inspect = "#<Sugoi::Window #{class_name} #{title.inspect} on #{workspace}>"
 
     private
@@ -264,6 +272,22 @@ module Sugoi
     end
 
     def direction(name) = one_of(name, %w[next previous])
+
+    # [A1] "" for no limit.
+    def memory(value)
+      return "" if value.nil?
+      return value.to_s if value.is_a?(Integer) && value.positive?
+      return value if value.is_a?(String) && value.match?(/\A\d+[KMGT]?\z/)
+
+      raise ArgumentError, "memory must be bytes or a number with K, M, G or T, not #{value.inspect}"
+    end
+
+    def cpu_weight(value)
+      return "" if value.nil?
+      return value.to_s if value.is_a?(Integer) && (1..10_000).cover?(value)
+
+      raise ArgumentError, "cpu_weight must be 1 to 10000, not #{value.inspect}"
+    end
 
     def workspace(n)
       return n if n.is_a?(Integer) && (1..30).cover?(n)
