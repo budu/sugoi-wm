@@ -8,6 +8,7 @@ section.
 
 | Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
 |-----------|------------|------------|-------|---------|---------|----------------------|
+| M7        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 200/200 | 17 fixed, 2 declined |
 | M6        | 2026-11-01 | 2026-11-01 | 0.3   | 7       | 171/171 | 16 fixed, 3 declined |
 | M5        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 160/160 | 19 fixed, 1 declined |
 | M4        | 2026-11-01 | 2026-11-01 | 0.5   | 8       | 139/139 | 18 fixed, 1 declined |
@@ -29,6 +30,49 @@ Measured once, at the release (M8): RSS and idle CPU of the WM process. Referenc
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
 ## Entries
+
+### M7 EWMH and IPC
+
+Status: closed 2026-11-01, on `m7-ewmh-ipc`, awaiting merge. No benchmarks: the
+footprint is measured at the release. The manual polybar check is the user's: neither
+polybar nor dunst is installed yet.
+
+- **Research.** polybar's workspace module needs the desktop count, names and current
+  desktop, the client list and each window's desktop; its title module the active
+  window; its bar maps as a dock with struts. The awesome claude, codex and update
+  widgets read scripts whose first line is "text severity" and the rest a popup.
+- **Decisions.** EWMH published from the event loop by difference; docks mapped, not
+  managed, and stacked under fullscreen only; exact desktop requests; activation
+  across workspaces only from pagers and the user; requests are Ruby; sugoictl is a
+  library too; confirmations are config; the widgets keep their scripts. All in the
+  [decision notes](../notes.md#interop).
+- **Changes.** `doc/spec/ewmh.md` with 14 behaviors; `wm/ewmh.rs`, `wm/ipc.rs`;
+  `sugoictl` as library and binary; `contrib/polybar/` (config and a status wrapper),
+  `contrib/sugoi-session`; `doc/config.rb` confirms quit and close through dmenu and
+  `sugoictl`. Code: 4,720 lines (3,853 after M6); tests: 4,230 lines (3,738).
+- **Tests.** 15 EWMH cases send client messages as bars and apps do; IPC cases in-process
+  (socket, serving) and with the binary (Ruby requests, quit, the socket in spawned
+  apps' environment, a looping `inspect` or message, an unread reply); sugoictl's exit
+  codes against a fake server.
+- **Review.** `/code-review high` on the branch, then on the fixes.
+
+  | Round     | P1 | P2 | P3 | Resolution                          |
+  |-----------|---:|---:|---:|-------------------------------------|
+  | Review    |  0 |  6 |  4 | 10 fixed in `a6fe117`               |
+  | Re-review |  0 |  3 |  6 | 7 fixed in `83464cf`, 2 declined    |
+
+  The P2s: the bar could cover a fullscreen window (twice, the second time through a
+  dock mapped later); a fullscreen state set before mapping was lost; user code in a
+  reply (`inspect`, an error's message) ran past the limit; replies were written
+  blocking; a huge strut overflowed; any app could switch the workspace, then, from my
+  fix, none could restore its own minimized window. Each has a case that fails on the
+  code before its fix. Declined: keeping `_NET_WM_STATE` on withdrawn windows (EWMH
+  says remove it), and dropping the IPC client IDs.
+- **Long runs.** `scripts/proptest-long`: 200 tests, 200 passed, in 1 min 43 s at
+  scale 20, none leaky; no test scope or socket left.
+- **Left open.** The polybar check by hand, once installed (`contrib/polybar/`); the
+  `kill` and limit bindings, to discuss.
+- **Hours.** 0.4 (main thread 0.4, background 0.0), from `agent-hours`.
 
 ### M6 cgroup spawning
 

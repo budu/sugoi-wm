@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **EWMH and IPC** (M7). Bars and pagers see the windows, the active window, 30 named
+  workspaces and the work area; docks reserve their edges; apps can go fullscreen
+  (F11), pagers switch and activate. `sugoictl "<ruby>"` runs Ruby in sugoi through
+  `$XDG_RUNTIME_DIR/sugoi/<display>.sock`. `contrib/polybar/` ports the awesome wibar,
+  and `contrib/sugoi-session` starts dunst, polybar and sugoi. See
+  `doc/spec/ewmh.md`.
 - **Apps and cgroups** (M6). `spawn` takes `memory:` and `cpu_weight:` limits for the
   app's scope; `kill` ends every process of the focused window's app scope (never
   sugoi's own, nor the X session's), and closes the window otherwise; hooks see a
