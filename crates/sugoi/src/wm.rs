@@ -70,6 +70,8 @@ struct Client {
     info: Info,
     /// [A3] The unit of its process when it was managed, for hooks.
     unit: Option<String>,
+    /// [A4] When its process started, to tell it from a later one with the same ID.
+    started: Option<u64>,
     /// The border width before sugoi managed the window, restored on withdrawal.
     border_width: u16,
     /// The outer rectangle the window has when it floats.
@@ -722,9 +724,10 @@ impl Wm {
                     || e.atom == self.atoms._NET_WM_WINDOW_TYPE
                     || e.atom == AtomEnum::WM_TRANSIENT_FOR.into()
                 {
-                    let cookies = self.request_info(e.window)?;
-                    let info = self.read_info(cookies)?;
+                    let cookies = self.request_info(e.window, false)?;
+                    let mut info = self.read_info(cookies)?;
                     let client = self.clients.get_mut(&e.window).expect("managed");
+                    info.pid = client.info.pid;
                     let reclassed = (&client.info.class, &client.info.instance)
                         != (&info.class, &info.instance);
                     client.info = info;
@@ -788,7 +791,7 @@ impl Wm {
         self.conn.change_window_attributes(window, &attributes)?;
         let geometry = self.conn.get_geometry(window)?;
         let size_hints = WmSizeHints::get_normal_hints(&self.conn, window)?;
-        let info = self.request_info(window)?;
+        let info = self.request_info(window, true)?;
         // [V9] An adopted window goes back on its workspace; a new one on the current.
         let (atom, cardinal) = (self.atoms._NET_WM_DESKTOP, AtomEnum::CARDINAL);
         let kept = if map {
@@ -825,6 +828,7 @@ impl Wm {
         let client = Client {
             hints,
             unit: info.pid.and_then(apps::unit_of),
+            started: info.pid.and_then(apps::start_time),
             info,
             border_width: geometry.border_width,
             rect: if map { self.initial_rect(rect, positioned) } else { rect },

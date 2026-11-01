@@ -18,7 +18,9 @@ behind them. Tests cite the identifiers in brackets. Spawning itself is [P1].
   may share the terminal's scope, or have its own (kitty gives each child one).
 - **[A4] Kill.** `kill` kills every process of the focused window's unit at once
   (`systemctl --user kill --signal=SIGKILL`), when that unit is a scope inside the user
-  manager's `app.slice` and not the scope sugoi itself runs in. Otherwise, or when
+  manager's `app.slice` and not the scope sugoi itself runs in, and when the process is
+  still the one that started before the window was managed (an ID may be reused once
+  the process that opened the connection exits). Otherwise, or when
   `systemctl` cannot run, it closes the window ([K1]): a window in the X session's own
   scope, or sugoi's, must not end the session. Everything in the scope ends, including
   a terminal an app shares it with ([A3]); `close` is the gentle way.

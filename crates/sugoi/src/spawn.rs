@@ -26,10 +26,25 @@ pub fn spawn(name: &str, argv: &[String], limits: &Limits) {
     start(command.iter().map(String::as_str));
 }
 
-/// [A4] Kills every process of a systemd user unit; false if `systemctl` cannot run.
+/// [A4] Kills every process of a systemd user unit; false if `systemctl` fails. It runs
+/// in the foreground, unlike apps, so its result is known (a few milliseconds).
 pub fn kill_unit(unit: &str) -> bool {
     info!("kill {unit}");
-    start(["systemctl", "--user", "kill", "--signal=SIGKILL", unit])
+    let status = Command::new("systemctl")
+        .args(["--user", "kill", "--signal=SIGKILL", unit])
+        .stdin(Stdio::null())
+        .status();
+    match status {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            warn!("cannot kill {unit}: systemctl {status}");
+            false
+        }
+        Err(e) => {
+            warn!("cannot kill {unit}: {e}");
+            false
+        }
+    }
 }
 
 /// Shows `message` through the notification daemon (dunst), if there is one.
@@ -40,22 +55,18 @@ pub fn notify(message: &str) {
 /// Runs `argv` through `setsid -f`, so the program is never sugoi's child: it is reaped
 /// across a restart, and gets no signal sent to sugoi's group. `setsid` forks and exits
 /// at once, so waiting for it does not block.
-fn start<'a>(argv: impl IntoIterator<Item = &'a str>) -> bool {
+fn start<'a>(argv: impl IntoIterator<Item = &'a str>) {
     let mut argv = argv.into_iter();
-    let Some(program) = argv.next() else { return false };
+    let Some(program) = argv.next() else { return };
     // `setsid -f` exits 0 even when the program is missing, so look first.
     if !on_path(program) {
         warn!("cannot start {program}: not found on PATH");
-        return false;
+        return;
     }
     let mut command = Command::new("setsid");
     command.arg("-f").arg(program).args(argv).stdin(Stdio::null());
-    match command.spawn().and_then(|mut setsid| setsid.wait()) {
-        Ok(_) => true,
-        Err(e) => {
-            warn!("cannot start {program}: {e}");
-            false
-        }
+    if let Err(e) = command.spawn().and_then(|mut setsid| setsid.wait()) {
+        warn!("cannot start {program}: {e}");
     }
 }
 

@@ -139,6 +139,11 @@ pub struct Binary {
 
 impl Binary {
     fn start(display: &str, config: Option<&str>) -> Binary {
+        Binary::start_with(display, config, &[])
+    }
+
+    /// Also puts `failing` stubs on PATH: programs that exit 1.
+    fn start_with(display: &str, config: Option<&str>, failing: &[&str]) -> Binary {
         static COUNT: AtomicUsize = AtomicUsize::new(0);
         let id = COUNT.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("sugoi-test-{}-{id}", std::process::id()));
@@ -153,6 +158,11 @@ impl Binary {
             let script = format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n{tail}", log.display());
             let path = bin.join(stub);
             fs::write(&path, script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        for stub in failing {
+            let path = bin.join(stub);
+            fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let config_path = dir.join("config.rb");
@@ -264,17 +274,30 @@ impl Session {
         session
     }
 
+    /// The sugoi binary running `config`, with `failing` programs that exit 1.
+    pub fn with_config_failing(config: &str, failing: &[&str]) -> Session {
+        let mut session = Session::without_wm();
+        session.binary = Some(Binary::start_with(&session.x.display, Some(config), failing));
+        session.wait_ready();
+        session
+    }
+
     fn with_binary(config: Option<&str>) -> Session {
         let mut session = Session::without_wm();
         session.binary = Some(Binary::start(&session.x.display, config));
+        session.wait_ready();
+        session
+    }
+
+    /// Waits until the binary is the WM and has handled a first window.
+    fn wait_ready(&self) {
         let redirect = EventMask::SUBSTRUCTURE_REDIRECT;
         eventually("sugoi is the WM", || {
-            let attributes = session.conn.get_window_attributes(session.root);
+            let attributes = self.conn.get_window_attributes(self.root);
             let masks = attributes.unwrap().reply().unwrap().all_event_masks;
             masks & redirect == redirect
         });
-        session.sync();
-        session
+        self.sync();
     }
 
     pub fn binary(&mut self) -> &mut Binary {
@@ -613,6 +636,10 @@ pub struct Scope {
 impl Scope {
     pub fn start(slice: &str, display: &str) -> Option<Scope> {
         static COUNT: AtomicUsize = AtomicUsize::new(0);
+        let paths = std::env::var_os("PATH").unwrap_or_default();
+        if !std::env::split_paths(&paths).any(|dir| dir.join("xterm").is_file()) {
+            return None;
+        }
         let running = Process::new("systemctl").args(["--user", "is-system-running"]).output();
         let state = String::from_utf8(running.ok()?.stdout).ok()?;
         if !matches!(state.trim(), "running" | "degraded") {

@@ -1,6 +1,6 @@
 //! Rules and hooks (`doc/spec/rules.md`).
 
-use x11rb::errors::ReplyError;
+use x11rb::errors::{ConnectionError, ReplyError};
 use x11rb::properties::WmClass;
 use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _, QueryClientIdsReply};
 use x11rb::protocol::xproto::*;
@@ -16,12 +16,17 @@ pub(super) struct InfoCookies<'c> {
     name: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     kind: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
     transient: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, GetPropertyReply>,
-    pid: x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, QueryClientIdsReply>,
+    /// None when the process is known already, or the server has no X-Resource.
+    pid: Option<
+        x11rb::cookie::Cookie<'c, x11rb::rust_connection::RustConnection, QueryClientIdsReply>,
+    >,
 }
 
 impl Wm {
     /// [U1] Asks for what a window is.
-    pub(super) fn request_info(&self, window: Window) -> Result<InfoCookies<'_>, Error> {
+    /// [U1] Asks for what a window is; `pid` also for its process ([A2]), which a
+    /// window's connection keeps for life, so only at manage.
+    pub(super) fn request_info(&self, window: Window, pid: bool) -> Result<InfoCookies<'_>, Error> {
         let a = &self.atoms;
         let get = |property: Atom, kind: AtomEnum| {
             self.conn.get_property(false, window, property, kind, 0, 1024)
@@ -41,11 +46,27 @@ impl Wm {
             kind: get(a._NET_WM_WINDOW_TYPE, AtomEnum::ATOM)?,
             transient: get(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)?,
             // [A2] The server knows the process behind each local connection.
-            pid: self.conn.res_query_client_ids(&[ClientIdSpec {
-                client: window,
-                mask: ClientIdMask::LOCAL_CLIENT_PID,
-            }])?,
+            pid: if pid { self.request_pid(window)? } else { None },
         })
+    }
+
+    /// [A2] The server knows the process behind each local connection; without the
+    /// X-Resource extension, nothing is known.
+    fn request_pid(
+        &self,
+        window: Window,
+    ) -> Result<
+        Option<
+            x11rb::cookie::Cookie<'_, x11rb::rust_connection::RustConnection, QueryClientIdsReply>,
+        >,
+        Error,
+    > {
+        let spec = ClientIdSpec { client: window, mask: ClientIdMask::LOCAL_CLIENT_PID };
+        match self.conn.res_query_client_ids(&[spec]) {
+            Ok(cookie) => Ok(Some(cookie)),
+            Err(ConnectionError::UnsupportedExtension) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// [U1] What a window is; missing or malformed properties read as empty.
@@ -63,14 +84,13 @@ impl Wm {
             .unwrap_or_default();
         let transient = vanished(cookies.transient.reply())?.is_some_and(|r| r.value_len > 0);
         // [A2] None for a remote client, or a server without X-Resource.
-        let pid = cookies.pid.reply().ok().and_then(|r| {
-            r.ids
-                .iter()
-                .find(|id| id.spec.mask == ClientIdMask::LOCAL_CLIENT_PID)?
-                .value
-                .first()
-                .copied()
-        });
+        let pid = match cookies.pid {
+            Some(cookie) => vanished(cookie.reply())?.and_then(|r| {
+                let id = r.ids.iter().find(|id| id.spec.mask == ClientIdMask::LOCAL_CLIENT_PID)?;
+                id.value.first().copied()
+            }),
+            None => None,
+        };
         Ok(Info {
             class,
             instance,

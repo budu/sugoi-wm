@@ -788,3 +788,15 @@ fn a1_a_zero_memory_limit_fails_the_block() {
     eventually("notified", || !notifications(&mut session).is_empty());
     assert!(spawns(&mut session).is_empty());
 }
+
+/// [A4] When systemctl fails, kill closes the window.
+#[test]
+fn a4_kill_closes_when_systemctl_fails() {
+    let session = Session::with_config_failing("key(\"Mod-x\") { kill }\n", &["systemctl"]);
+    let Some(mut scope) = Scope::start("app-sugoitest.slice", &session.x.display) else { return };
+    eventually("xterm focused", || session.focus() > POINTER_ROOT);
+    session.keys(&[SUPER, X]);
+    // Closed: xterm takes WM_DELETE_WINDOW and exits on its own, not by SIGKILL.
+    eventually("closed", || !scope.running());
+    assert!(!scope.killed());
+}

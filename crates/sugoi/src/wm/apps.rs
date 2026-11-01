@@ -30,6 +30,15 @@ fn killable(path: &str, own: Option<&str>) -> Option<String> {
     (app_scope(path) && Some(path) != own).then(|| unit(path)).flatten()
 }
 
+/// [A4] When process `pid` started, in clock ticks since boot (`/proc/<pid>/stat`'s 22nd
+/// field), which tells it from a later process given the same ID.
+pub(super) fn start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name, in parentheses, may hold spaces: count fields after it.
+    let rest = &stat[stat.rfind(')')? + 2..];
+    rest.split(' ').nth(19)?.parse().ok()
+}
+
 /// [A3] The unit process `pid` is in.
 pub(super) fn unit_of(pid: u32) -> Option<String> {
     unit(&cgroup(&pid.to_string())?)
@@ -37,10 +46,14 @@ pub(super) fn unit_of(pid: u32) -> Option<String> {
 
 impl Wm {
     /// [A4] Kills the unit of `window`'s app if that is safe, else closes the window. The
-    /// cgroup is read again: the process is the window's connection's, so it lives.
+    /// process must be the one seen at manage: the one that opened the connection may
+    /// have exited, and its ID gone to another app.
     pub(super) fn kill(&mut self, window: Window) -> Result<(), Error> {
-        let path =
-            self.clients.get(&window).and_then(|c| c.info.pid).and_then(|p| cgroup(&p.to_string()));
+        let pid = self.clients.get(&window).and_then(|c| {
+            let pid = c.info.pid?;
+            (c.started.is_some() && start_time(pid) == c.started).then_some(pid)
+        });
+        let path = pid.and_then(|p| cgroup(&p.to_string()));
         match path.and_then(|path| killable(&path, self.own_cgroup.as_deref())) {
             Some(unit) if kill_unit(&unit) => Ok(()),
             _ => self.close(window),
@@ -71,6 +84,15 @@ mod tests {
         assert!(!app_scope("/user.slice/user-1000.slice/user@1000.service/session.slice/x.scope"));
         let kitty_child = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-superkitty.slice/kitty-21404-5.scope";
         assert!(app_scope(kitty_child));
+    }
+
+    #[test]
+    fn start_times_tell_processes_apart() {
+        let me = std::process::id();
+        let started = start_time(me);
+        assert!(started.is_some());
+        assert_eq!(start_time(me), started);
+        assert_eq!(start_time(u32::MAX), None);
     }
 
     #[test]
