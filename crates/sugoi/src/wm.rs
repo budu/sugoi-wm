@@ -2,6 +2,7 @@
 
 mod apps;
 mod desks;
+mod ewmh;
 mod place;
 mod rules;
 
@@ -31,7 +32,7 @@ use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
 use crate::{
     Action, Border, Command, Direction, Error, Event as HookEvent, Handle, HookArg, Info, Rule,
-    Script, Settings,
+    Script, Settings, WindowType,
 };
 use desks::Desk;
 use place::Drag;
@@ -53,6 +54,35 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE_UTILITY,
         _NET_WM_WINDOW_TYPE_TOOLBAR,
         _NET_WM_WINDOW_TYPE_MENU,
+        _NET_WM_WINDOW_TYPE_DOCK,
+        _NET_SUPPORTED,
+        _NET_SUPPORTING_WM_CHECK,
+        _NET_CLIENT_LIST,
+        _NET_CLIENT_LIST_STACKING,
+        _NET_ACTIVE_WINDOW,
+        _NET_NUMBER_OF_DESKTOPS,
+        _NET_DESKTOP_NAMES,
+        _NET_DESKTOP_GEOMETRY,
+        _NET_DESKTOP_VIEWPORT,
+        _NET_WORKAREA,
+        _NET_WM_STATE,
+        _NET_WM_STATE_FULLSCREEN,
+        _NET_WM_STATE_ABOVE,
+        _NET_WM_STATE_HIDDEN,
+        _NET_WM_STATE_MAXIMIZED_VERT,
+        _NET_WM_STATE_MAXIMIZED_HORZ,
+        _NET_WM_ALLOWED_ACTIONS,
+        _NET_WM_ACTION_MOVE,
+        _NET_WM_ACTION_RESIZE,
+        _NET_WM_ACTION_FULLSCREEN,
+        _NET_WM_ACTION_MAXIMIZE_HORZ,
+        _NET_WM_ACTION_MAXIMIZE_VERT,
+        _NET_WM_ACTION_MINIMIZE,
+        _NET_WM_ACTION_CLOSE,
+        _NET_WM_ACTION_CHANGE_DESKTOP,
+        _NET_CLOSE_WINDOW,
+        _NET_WM_STRUT,
+        _NET_WM_STRUT_PARTIAL,
     }
 }
 
@@ -70,6 +100,8 @@ struct Client {
     info: Info,
     /// [A3] The unit of its process when it was managed, for hooks.
     unit: Option<String>,
+    /// [E5] The `_NET_WM_STATE` last written.
+    net_state: Option<Vec<Atom>>,
     /// [A4] When its process started, to tell it from a later one with the same ID.
     started: Option<u64>,
     /// The border width before sugoi managed the window, restored on withdrawal.
@@ -152,8 +184,14 @@ pub struct Wm {
     /// [V1] The current workspace, and the one before the last switch ([V6]).
     current: usize,
     back: usize,
-    /// The work area ([Y1]), and the screen for now.
+    /// The work area ([Y1], [E4]), and the whole screen.
     screen: Rect,
+    root_rect: Rect,
+    /// [E2] Managed windows in the order they were managed.
+    managed: Vec<Window>,
+    /// [E4] Docks and their struts: left, right, top, bottom.
+    docks: HashMap<Window, [u32; 4]>,
+    published: ewmh::Published,
     /// [W8] Managed windows in the order they were raised, and as last stacked.
     stack: Vec<Window>,
     stacked: Vec<Window>,
@@ -189,6 +227,7 @@ impl Wm {
 
     /// Loads the settings and adopts the windows; [`Wm::new`] without the connection.
     pub fn start(&mut self) -> Result<(), Error> {
+        self.setup_ewmh()?;
         self.load()?;
         self.adopt()?;
         self.conn.flush()?;
@@ -255,6 +294,10 @@ impl Wm {
             current: 0,
             back: 0,
             screen: Rect::new(0, 0, width, height),
+            root_rect: Rect::new(0, 0, width, height),
+            managed: Vec::new(),
+            docks: HashMap::new(),
+            published: ewmh::Published::default(),
             stack: Vec::new(),
             stacked: Vec::new(),
             minimized: Vec::new(),
@@ -322,6 +365,8 @@ impl Wm {
                 self.execute(command)?;
                 continue;
             }
+            self.publish()?;
+            self.conn.flush()?;
             let mut fds = [
                 PollFd::new(self.conn.stream(), PollFlags::IN),
                 PollFd::new(&self.wake, PollFlags::IN),
@@ -632,6 +677,22 @@ impl Wm {
         let sent = event.sent_event();
         match event {
             Event::MapRequest(e) => self.manage(e.window)?,
+            // [E4] Docks: gone, or new struts.
+            Event::UnmapNotify(e) if self.docks.contains_key(&e.window) => {
+                self.remove_dock(e.window)?
+            }
+            Event::DestroyNotify(e) if self.docks.contains_key(&e.window) => {
+                self.remove_dock(e.window)?
+            }
+            Event::PropertyNotify(e)
+                if self.docks.contains_key(&e.window)
+                    && (e.atom == self.atoms._NET_WM_STRUT
+                        || e.atom == self.atoms._NET_WM_STRUT_PARTIAL) =>
+            {
+                self.update_strut(e.window)?
+            }
+            // [E7] to [E10]
+            Event::ClientMessage(e) => self.client_message(&e)?,
             Event::ConfigureRequest(e) => self.configure_request(&e)?,
             // [M4] [W6] A synthetic unmap is a client withdrawing its window (ICCCM 4.1.4);
             // a real one counts once, from the root, unless sugoi's own request made it.
@@ -751,6 +812,10 @@ impl Wm {
 
     /// [M1] and [M2], for a `MapRequest`.
     fn manage(&mut self, window: Window) -> Result<(), Error> {
+        if self.docks.contains_key(&window) {
+            self.conn.map_window(window)?;
+            return Ok(());
+        }
         if let Some(client) = self.clients.get(&window) {
             // [W6] A client maps its minimized window to show it again (ICCCM 4.1.4); a
             // window on another workspace stays hidden ([V2]).
@@ -800,6 +865,11 @@ impl Wm {
             Some(self.conn.get_property(false, window, atom, cardinal, 0, 1)?)
         };
         let info = self.read_info(info)?;
+        // [E4] A bar is mapped, never managed.
+        if info.kind == Some(WindowType::Dock) {
+            drop((geometry, size_hints, kept));
+            return self.add_dock(window, map);
+        }
         let Some(hints) = self.read_hints(window)? else {
             return Ok(());
         };
@@ -828,6 +898,7 @@ impl Wm {
         let client = Client {
             hints,
             unit: info.pid.and_then(apps::unit_of),
+            net_state: None,
             started: info.pid.and_then(apps::start_time),
             info,
             border_width: geometry.border_width,
@@ -844,6 +915,8 @@ impl Wm {
             unmaps: VecDeque::new(),
         };
         self.clients.insert(window, client);
+        self.managed.push(window);
+        self.set_allowed_actions(window)?;
         self.order.push(window);
         self.history.push(window);
         self.stack.push(window);
@@ -877,7 +950,8 @@ impl Wm {
         // [H1] The window as it was, as every other hook sees windows.
         let gone = self.snapshot(window);
         let client = self.clients.remove(&window).expect("managed");
-        for list in [&mut self.history, &mut self.order, &mut self.stack, &mut self.minimized] {
+        let lists = [&mut self.history, &mut self.order, &mut self.stack, &mut self.minimized];
+        for list in lists.into_iter().chain([&mut self.managed]) {
             list.retain(|&w| w != window);
         }
         if self.drag.as_ref().is_some_and(|d| d.window() == window) {

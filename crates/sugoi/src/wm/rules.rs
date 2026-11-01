@@ -143,6 +143,7 @@ impl Wm {
             t if t == a._NET_WM_WINDOW_TYPE_UTILITY => WindowType::Utility,
             t if t == a._NET_WM_WINDOW_TYPE_TOOLBAR => WindowType::Toolbar,
             t if t == a._NET_WM_WINDOW_TYPE_MENU => WindowType::Menu,
+            t if t == a._NET_WM_WINDOW_TYPE_DOCK => WindowType::Dock,
             _ => return None,
         })
     }

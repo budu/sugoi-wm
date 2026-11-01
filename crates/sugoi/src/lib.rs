@@ -134,6 +134,8 @@ pub enum Choice {
 pub enum Goto {
     /// 1 to 10 cycle through their class; 11 to 30 are exact.
     Number(u32),
+    /// [E9] A workspace index, 0 to 29, whatever the current one.
+    Index(usize),
     Next,
     Previous,
     Back,
@@ -225,16 +227,19 @@ pub enum WindowType {
     Utility,
     Toolbar,
     Menu,
+    /// [E4] A bar: mapped, never managed.
+    Dock,
 }
 
 impl WindowType {
-    pub const ALL: [(WindowType, &'static str); 6] = [
+    pub const ALL: [(WindowType, &'static str); 7] = [
         (WindowType::Normal, "normal"),
         (WindowType::Dialog, "dialog"),
         (WindowType::Splash, "splash"),
         (WindowType::Utility, "utility"),
         (WindowType::Toolbar, "toolbar"),
         (WindowType::Menu, "menu"),
+        (WindowType::Dock, "dock"),
     ];
 
     pub fn name(self) -> &'static str {
@@ -431,6 +436,12 @@ impl std::error::Error for Error {}
 
 impl From<x11rb::errors::ConnectionError> for Error {
     fn from(e: x11rb::errors::ConnectionError) -> Self {
+        Error::Connection(e.to_string())
+    }
+}
+
+impl From<x11rb::errors::ReplyOrIdError> for Error {
+    fn from(e: x11rb::errors::ReplyOrIdError) -> Self {
         Error::Connection(e.to_string())
     }
 }

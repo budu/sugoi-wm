@@ -92,6 +92,8 @@ impl Wm {
     /// [V4] to [V7]
     pub(super) fn switch(&mut self, goto: Goto) -> Result<(), Error> {
         let target = match goto {
+            Goto::Index(index) if index < COUNT => index,
+            Goto::Index(_) => return Ok(()),
             Goto::Number(n) => match workspace::target(self.current, n) {
                 Some(target) => target,
                 None => return Ok(()),
@@ -139,8 +141,16 @@ impl Wm {
     /// [V8] [H2]
     pub(super) fn move_window(&mut self, window: Window, n: u32) -> Result<(), Error> {
         let from = self.clients[&window].workspace;
-        let Some(target) = workspace::target(from, n) else { return Ok(()) };
-        if target == from {
+        match workspace::target(from, n) {
+            Some(target) => self.move_to_index(window, target),
+            None => Ok(()),
+        }
+    }
+
+    /// [V8] [E9] Puts `window` on workspace `target` (an index).
+    pub(super) fn move_to_index(&mut self, window: Window, target: usize) -> Result<(), Error> {
+        let from = self.clients[&window].workspace;
+        if target == from || target >= COUNT {
             return Ok(());
         }
         self.clients.get_mut(&window).expect("managed").workspace = target;

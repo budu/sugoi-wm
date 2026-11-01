@@ -39,7 +39,7 @@ impl Wm {
     }
 
     /// [W8] The stacking layer of `window`, from the bottom.
-    fn layer(&self, window: Window) -> u8 {
+    pub(super) fn layer(&self, window: Window) -> u8 {
         let c = &self.clients[&window];
         if c.fullscreen {
             3
@@ -79,7 +79,7 @@ impl Wm {
         for window in others {
             let c = &self.clients[&window];
             let (rect, border) = if c.fullscreen {
-                (self.screen, 0)
+                (self.root_rect, 0)
             } else if c.maximized {
                 (self.screen, self.border.width)
             } else {
