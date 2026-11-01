@@ -27,7 +27,7 @@ use crate::keyboard::Keyboard;
 use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
 use crate::{Action, Border, Command, Direction, Error, Handle, Script, Settings};
-use place::{Drag, outer};
+use place::Drag;
 
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
@@ -115,8 +115,8 @@ pub struct Wm {
     /// [W6] Minimized windows, the latest last.
     minimized: Vec<Window>,
     drag: Option<Drag>,
-    /// Where the last button press was, for a drag it starts.
-    press: Option<(i16, i16)>,
+    /// Where the last button press was and the managed window it hit, for a drag.
+    press: Option<(i16, i16, Option<Window>)>,
     /// Events read while dropping crossings ([Z1]), still to handle.
     pending: VecDeque<Event>,
     clients: HashMap<Window, Client>,
@@ -247,7 +247,7 @@ impl Wm {
                     }
                     Exit::Restart => {
                         restart();
-                        self.regrab(true)?;
+                        self.reclaim()?;
                     }
                 }
             }
@@ -586,7 +586,8 @@ impl Wm {
                 }
             }
             Event::ButtonPress(e) => {
-                self.press = Some((e.root_x, e.root_y));
+                let hit = self.clients.contains_key(&e.event).then_some(e.event);
+                self.press = Some((e.root_x, e.root_y, hit));
                 let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
                 let managed = self.clients.contains_key(&e.event);
                 match action {
@@ -635,7 +636,11 @@ impl Wm {
 
     /// [M1] and [M2], for a `MapRequest`.
     fn manage(&mut self, window: Window) -> Result<(), Error> {
-        if self.clients.contains_key(&window) {
+        if let Some(client) = self.clients.get(&window) {
+            // [W6] A client maps its minimized window to show it again (ICCCM 4.1.4).
+            if client.minimized {
+                return self.restore_window(window);
+            }
             self.conn.map_window(window)?;
             return Ok(());
         }
@@ -686,11 +691,10 @@ impl Wm {
             state,
             &[NORMAL_STATE, NONE],
         )?;
-        let mut rect = outer(&geometry);
         // The window's border becomes sugoi's; its inner size stays.
         let border = 2 * u32::from(self.border.width);
-        rect.width = u32::from(geometry.width) + border;
-        rect.height = u32::from(geometry.height) + border;
+        let (width, height) = (u32::from(geometry.width), u32::from(geometry.height));
+        let rect = Rect::new(geometry.x.into(), geometry.y.into(), width + border, height + border);
         let client = Client {
             hints,
             border_width: geometry.border_width,
@@ -753,13 +757,14 @@ impl Wm {
         let resized =
             aux.x.is_some() || aux.y.is_some() || aux.width.is_some() || aux.height.is_some();
         let floating = !self.tiled(e.window) && !client.maximized && !client.fullscreen;
-        if floating && resized {
-            let border = 2 * u32::from(self.border.width);
-            let mut rect = client.rect;
-            rect.x = aux.x.unwrap_or(rect.x);
-            rect.y = aux.y.unwrap_or(rect.y);
-            rect.width = aux.width.map_or(rect.width, |w| w + border);
-            rect.height = aux.height.map_or(rect.height, |h| h + border);
+        let border = 2 * u32::from(self.border.width);
+        let mut rect = client.rect;
+        rect.x = aux.x.unwrap_or(rect.x);
+        rect.y = aux.y.unwrap_or(rect.y);
+        rect.width = aux.width.map_or(rect.width, |w| w + border);
+        rect.height = aux.height.map_or(rect.height, |h| h + border);
+        // A request for where the window already is gets a synthetic reply too.
+        if floating && resized && rect != self.placed(e.window) {
             self.clients.get_mut(&e.window).expect("managed").rect = rect;
             self.arrange()?;
         } else {
@@ -930,6 +935,10 @@ impl Bindings {
         };
         if settings.layouts.is_empty() {
             return Err("layouts needs at least one layout".into());
+        }
+        let width = settings.master.width;
+        if !(crate::layout::MIN_FACTOR..=crate::layout::MAX_FACTOR).contains(&width) {
+            return Err(format!("master width must be between 0.05 and 0.95, not {width}"));
         }
         Ok(Bindings {
             border: settings.border,

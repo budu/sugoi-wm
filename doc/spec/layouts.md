@@ -17,8 +17,9 @@ workspace; until then there is one of each.
   `tile.left`); with one tiled window it takes the whole area. New windows join the end
   of the order, so they go to the stack.
 - **[Y3] Shares.** Each window in the stack column has a share of its height, equal by
-  default. `window_height 0.05` gives the focused stack window 5 points more of the
-  column, taken from the others in proportion; a share stays between 0.05 and 0.95.
+  default; a new window gets an average share. `window_height 0.05` gives the focused
+  stack window 5 points more of the column, taken from the others in proportion; no
+  share goes below 0.05 or above 0.95.
 - **[Y4] Master width.** `master_width 0.05` widens the master column by 5 points of
   the work area; it stays between 0.05 and 0.95.
 - **[Y5] Max.** Every tiled window fills the work area; raising one shows it.
@@ -26,11 +27,13 @@ workspace; until then there is one of each.
   them where it put them.
 - **[Y7] Choosing.** `layouts :tile, :max, :float` sets the cycle and the starting
   layout (its first); `layout :next` and `layout :previous` move along it, wrapping, and
-  `layout :max` picks one. `master side: :left, width: 0.6` sets the master column.
+  `layout :max` picks one. `master side: :left, width: 0.6` sets the master column;
+  a width outside 0.05 to 0.95 fails the load ([L4]).
 - **[Y8] Borders.** A window's border is inside its cell: the window is the cell less
   twice the border width, and at least 1 px.
 - **[Y9] Requests.** A tiled window's `ConfigureRequest` is refused with a synthetic
-  `ConfigureNotify` of its cell ([M3]); a floating window's is applied.
+  `ConfigureNotify` of its cell ([M3]); a floating window's is applied, or answered with
+  a synthetic one when it asks for where it already is.
 
 ## States
 
@@ -46,8 +49,9 @@ workspace; until then there is one of each.
 - **[W5] On top.** `toggle :on_top` keeps a window above the floating ones.
 - **[W6] Minimized.** `minimize` unmaps the focused window and sets its `WM_STATE` to
   `IconicState`; the focus goes on as when a window closes ([F5]). `restore` maps the
-  most recently minimized window again and focuses it. An unmap sugoi makes is not the
-  client withdrawing its window ([M4]).
+  most recently minimized window again and focuses it, as a client mapping its own
+  minimized window does. An unmap sugoi makes is not the client withdrawing its window
+  ([M4]).
 - **[W7] Center.** `center` centers the focused window on the screen, and
   `center size: 0.7` also sizes it to 70 % of the screen; both make a tiled window
   float.
@@ -57,8 +61,9 @@ workspace; until then there is one of each.
 
 ## Mouse
 
-- **[G1] Move.** `move` in a button block starts dragging the clicked window: it
-  follows the pointer until the button is released. A tiled window starts floating.
+- **[G1] Move.** `move` in a button block starts dragging the clicked window, even one
+  that cannot take the focus: it follows the pointer until the button is released. A
+  tiled, maximized or fullscreen window starts floating where it shows.
 - **[G2] Resize.** `resize` in a button block resizes the clicked window from its
   bottom-right corner, where the pointer is moved, until the button is released, to at
   least 1 px. A tiled window starts floating.

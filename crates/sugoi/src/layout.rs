@@ -52,7 +52,8 @@ pub fn tile(area: Rect, master: Master, shares: &[f32]) -> Vec<Rect> {
     if shares.is_empty() {
         return vec![area];
     }
-    let master_width = (area.width as f32 * master.width).round() as u32;
+    let factor = master.width.clamp(MIN_FACTOR, MAX_FACTOR);
+    let master_width = (area.width as f32 * factor).round() as u32;
     let stack_width = area.width - master_width;
     let (master_x, stack_x) = match master.side {
         Side::Left => (area.x, area.x + master_width as i32),
@@ -75,20 +76,21 @@ pub fn tile(area: Rect, master: Master, shares: &[f32]) -> Vec<Rect> {
 }
 
 /// [Y3] Adds `delta` of the column to share `index`, taking it from the others in
-/// proportion. Shares are fractions of the column and sum to 1.
+/// proportion, so each keeps at least `MIN_FACTOR` of the column. Shares are weights:
+/// their sum stays what it was, so a new window's 1.0 is an average share.
 pub fn grow_share(shares: &mut [f32], index: usize, delta: f32) {
     let total: f32 = shares.iter().sum();
-    for share in shares.iter_mut() {
-        *share /= total;
-    }
-    let others = 1.0 - shares[index];
-    let target = (shares[index] + delta).clamp(MIN_FACTOR, MAX_FACTOR);
+    let fraction = |share: f32| share / total;
+    let others = 1.0 - fraction(shares[index]);
     if others <= 0.0 {
         return;
     }
+    let most = (1.0 - MIN_FACTOR * (shares.len() - 1) as f32).min(MAX_FACTOR);
+    let target = (fraction(shares[index]) + delta).clamp(MIN_FACTOR, most.max(MIN_FACTOR));
     let scale = (1.0 - target) / others;
     for (i, share) in shares.iter_mut().enumerate() {
-        *share = if i == index { target } else { *share * scale };
+        let new = if i == index { target } else { fraction(*share) * scale };
+        *share = new * total;
     }
 }
 
@@ -156,14 +158,31 @@ mod tests {
         assert_eq!(heights, [33, 33, 34]);
     }
 
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-5
+    }
+
     #[test]
     fn growing_a_share_takes_from_the_others_in_proportion() {
         let mut shares = [0.5, 0.25, 0.25];
         grow_share(&mut shares, 0, 0.1);
-        assert!((shares[0] - 0.6).abs() < 1e-6);
-        assert!((shares[1] - 0.2).abs() < 1e-6 && (shares[2] - 0.2).abs() < 1e-6);
+        assert!(close(shares[0], 0.6) && close(shares[1], 0.2) && close(shares[2], 0.2));
+    }
+
+    #[test]
+    fn shares_keep_their_sum_and_their_minimum() {
+        let mut shares = [1.0, 1.0, 1.0];
+        grow_share(&mut shares, 0, 0.05);
+        assert!(close(shares.iter().sum(), 3.0));
         grow_share(&mut shares, 0, 1.0);
-        assert!((shares[0] - MAX_FACTOR).abs() < 1e-6);
+        let fractions: Vec<f32> = shares.iter().map(|s| s / 3.0).collect();
+        assert!(close(fractions[0], 0.9) && close(fractions[1], 0.05) && close(fractions[2], 0.05));
+    }
+
+    #[test]
+    fn a_master_width_out_of_range_is_clamped() {
+        let master = Master { side: Side::Left, width: 1.2 };
+        assert_eq!(tile(AREA, master, &[1.0])[1], Rect::new(1216, 0, 64, 800));
     }
 
     #[test]

@@ -526,3 +526,12 @@ fn y7_an_unknown_layout_fails_the_load() {
     let notes = notifications(&mut session);
     assert!(notes[0].contains("expected one of :tile, :max, :float, not :spiral"), "{notes:?}");
 }
+
+/// [Y7] and [L4]
+#[test]
+fn y7_a_master_width_out_of_range_fails_the_load() {
+    let mut session = Session::with_config("master width: 1.2\n");
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("master width must be between 0.05 and 0.95"), "{notes:?}");
+}

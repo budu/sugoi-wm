@@ -369,3 +369,64 @@ fn w6_a_client_withdrawing_a_minimized_window_unmanages_it() {
     apps[0].conn.sync().unwrap();
     eventually("withdrawn", || session.wm_state(apps[0].window).is_none());
 }
+
+/// [Y3]
+#[test]
+fn y3_a_new_window_gets_an_average_share() {
+    let session = tiling();
+    let apps = map(&session, 3);
+    send(&session, Command::Focus(sugoi::Direction::Previous));
+    eventually("b focused", || session.focus() == apps[1].window);
+    send(&session, Command::WindowHeight(0.05));
+    eventually("b taller", || session.outer(apps[1].window).3 == 440);
+    let d = session.app(AppSpec::at(0, 0, 200, 100));
+    d.map();
+    // Weights 1.1, 0.9 and 1.0: d gets a third of the column.
+    eventually("d a third", || session.outer(d.window) == (0, 533, 640, 267));
+}
+
+/// [G1]
+#[test]
+fn g1_move_drags_the_clicked_window_even_if_it_cannot_take_the_focus() {
+    let session = mouse();
+    let spec = AppSpec { input: Some(false), ..AppSpec::at(0, 0, 200, 100) };
+    let inert = session.app(spec);
+    inert.map();
+    eventually("inert managed", || session.wm_state(inert.window).is_some());
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    eventually("tiled", || session.outer(inert.window) == (640, 0, 640, 800));
+    session.drag(SUPER, 1, (1000, 400), (900, 350));
+    eventually("inert moved", || session.outer(inert.window) == (540, -50, 640, 800));
+    assert_eq!(session.outer(a.window), FULL);
+}
+
+/// [W6]
+#[test]
+fn w6_a_client_mapping_its_minimized_window_restores_it() {
+    let session = tiling();
+    let apps = map(&session, 2);
+    send(&session, Command::Minimize);
+    eventually("iconic", || session.wm_state(apps[1].window) == Some(vec![3, 0]));
+    apps[1].map();
+    eventually("normal", || session.wm_state(apps[1].window) == Some(vec![1, 0]));
+    eventually("focused", || session.focus() == apps[1].window);
+    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
+}
+
+/// [Y9]
+#[test]
+fn y9_a_floating_request_for_the_same_geometry_gets_a_reply() {
+    let session = Session::with_settings(floating());
+    let events = EventMask::STRUCTURE_NOTIFY;
+    let app = session.app(AppSpec { events, ..AppSpec::at(100, 100, 200, 100) });
+    app.map();
+    eventually("placed", || session.outer(app.window) == (100, 100, 206, 106));
+    settle();
+    while app.conn.poll_for_event().unwrap().is_some() {}
+    let request = ConfigureWindowAux::new().x(100).y(100).width(200).height(100);
+    app.conn.configure_window(app.window, &request).unwrap();
+    app.conn.flush().unwrap();
+    app.expect_event("a ConfigureNotify", |e| matches!(e, Event::ConfigureNotify(_)));
+}

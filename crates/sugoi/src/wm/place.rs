@@ -35,6 +35,11 @@ impl Wm {
         self.layout != Layout::Float && !(c.floating || c.maximized || c.fullscreen || c.minimized)
     }
 
+    /// [Y1] The windows the layout places, in the window order.
+    pub(super) fn tiled_windows(&self) -> Vec<Window> {
+        self.order.iter().copied().filter(|&w| self.tiled(w)).collect()
+    }
+
     /// [W8] The stacking layer of `window`, from the bottom.
     fn layer(&self, window: Window) -> u8 {
         let c = &self.clients[&window];
@@ -51,7 +56,7 @@ impl Wm {
 
     /// [Y1] Places every window where its layout and state say, then restacks.
     pub(super) fn arrange(&mut self) -> Result<(), Error> {
-        let tiled: Vec<Window> = self.order.iter().copied().filter(|&w| self.tiled(w)).collect();
+        let tiled = self.tiled_windows();
         let cells = match self.layout {
             Layout::Tile if !tiled.is_empty() => {
                 let shares: Vec<f32> = tiled[1..].iter().map(|w| self.clients[w].share).collect();
@@ -161,9 +166,7 @@ impl Wm {
         };
         // [Y6] Windows the layout placed float from where they are.
         if layout == Layout::Float {
-            let tiled: Vec<Window> =
-                self.order.iter().copied().filter(|&w| self.tiled(w)).collect();
-            for window in tiled {
+            for window in self.tiled_windows() {
                 let rect = self.placed(window);
                 self.clients.get_mut(&window).expect("managed").rect = rect;
             }
@@ -180,7 +183,7 @@ impl Wm {
 
     /// [Y3] Only a window in the stack column has a share to change.
     pub(super) fn window_height(&mut self, delta: f32) -> Result<(), Error> {
-        let tiled: Vec<Window> = self.order.iter().copied().filter(|&w| self.tiled(w)).collect();
+        let tiled = self.tiled_windows();
         let Some(index) = self.focused.and_then(|f| tiled.iter().position(|&w| w == f)) else {
             return Ok(());
         };
@@ -254,14 +257,36 @@ impl Wm {
         self.refocus(window)
     }
 
-    /// [W6]
+    /// [W6] The most recently minimized window.
     pub(super) fn restore(&mut self) -> Result<(), Error> {
-        let Some(window) = self.minimized.pop() else { return Ok(()) };
+        match self.minimized.last() {
+            Some(&window) => self.restore_window(window),
+            None => Ok(()),
+        }
+    }
+
+    pub(super) fn restore_window(&mut self, window: Window) -> Result<(), Error> {
+        self.minimized.retain(|&w| w != window);
         self.clients.get_mut(&window).expect("minimized windows are managed").minimized = false;
         self.set_state(window, NORMAL_STATE)?;
         self.arrange()?;
         self.conn.map_window(window)?;
         self.focus(window, true)
+    }
+
+    /// After a failed restart: gives the windows sugoi's borders back, and hides the
+    /// minimized ones `release_all` mapped.
+    pub(super) fn reclaim(&mut self) -> Result<(), Error> {
+        for &window in &self.minimized {
+            self.clients.get_mut(&window).expect("minimized windows are managed").unmaps += 1;
+            self.conn.unmap_window(window)?;
+            self.set_state(window, ICONIC_STATE)?;
+        }
+        for client in self.clients.values_mut() {
+            client.placed = None;
+        }
+        self.regrab(true)?;
+        self.arrange()
     }
 
     pub(super) fn set_state(&self, window: Window, state: u32) -> Result<(), Error> {
@@ -270,20 +295,33 @@ impl Wm {
         Ok(())
     }
 
-    /// [G1] [G2] Starts dragging the focused window, from the last button press.
+    /// [G1] [G2] Starts dragging the window the last button press hit.
     pub(super) fn start_drag(&mut self, resize: bool) -> Result<(), Error> {
-        let (Some(window), Some(pointer)) = (self.focused, self.press) else { return Ok(()) };
+        let Some((x, y, Some(window))) = self.press else { return Ok(()) };
+        if !self.clients.contains_key(&window) {
+            return Ok(());
+        }
+        // A maximized or fullscreen window is dragged from where it shows.
+        let placed = self.placed(window);
+        let client = self.clients.get_mut(&window).expect("managed");
+        if client.maximized || client.fullscreen {
+            (client.maximized, client.fullscreen) = (false, false);
+            client.floating = true;
+            client.rect = placed;
+        }
         self.float(window);
         self.arrange()?;
         self.raise(window)?;
         let rect = self.clients[&window].rect;
         let pointer = if resize {
-            let corner = (rect.x + rect.width as i32 - 1, rect.y + rect.height as i32 - 1);
-            let corner = (corner.0 as i16, corner.1 as i16);
+            // The corner, kept on screen, where X would clamp the warp anyway.
+            let right = (rect.x + rect.width as i32 - 1).min(self.screen.width as i32 - 1);
+            let bottom = (rect.y + rect.height as i32 - 1).min(self.screen.height as i32 - 1);
+            let corner = (right.max(0) as i16, bottom.max(0) as i16);
             self.conn.warp_pointer(NONE, self.root, 0, 0, 0, 0, corner.0, corner.1)?;
             corner
         } else {
-            pointer
+            (x, y)
         };
         let mask = EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE;
         let (root, async_) = (self.root, GrabMode::ASYNC);
@@ -314,7 +352,9 @@ impl Wm {
             return self.end_drag();
         };
         client.rect = rect;
-        self.arrange()
+        // Only the dragged window moves: no arrange, no round trip per motion.
+        self.place(window, rect, self.border.width)?;
+        Ok(())
     }
 
     pub(super) fn end_drag(&mut self) -> Result<(), Error> {
@@ -355,10 +395,4 @@ impl Wm {
     pub(super) fn can_focus(&self, window: Window) -> bool {
         self.clients.get(&window).is_some_and(|c| c.hints.focusable() && !c.minimized)
     }
-}
-
-/// The outer rectangle of a window with geometry `g`.
-pub(super) fn outer(g: &GetGeometryReply) -> Rect {
-    let border = 2 * u32::from(g.border_width);
-    Rect::new(g.x.into(), g.y.into(), u32::from(g.width) + border, u32::from(g.height) + border)
 }
