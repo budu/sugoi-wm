@@ -1,0 +1,8 @@
+#!/bin/sh
+# An X session for sugoi: what the awesome config started (lxpolkit), the bar and the
+# notification daemon, then sugoi. From ~/.xinitrc: exec ~/projects/sugoi-wm/contrib/sugoi-session
+# If sugoi cannot start (a Ruby upgrade, see contrib/sugoi-ruby.hook), awesome takes over.
+dunst &
+lxpolkit &
+(sleep 1 && polybar sugoi) &
+sugoi || exec awesome

@@ -16,8 +16,12 @@ key("Mod-Shift-k") { swap :next }
 
 # Session
 key("Mod-Ctrl-r") { reload }
-key("Mod-Shift-e") { quit }
-key("Mod-Shift-q") { close }
+# Asked with dmenu, as awesome did; sugoictl (on PATH) carries the answer out
+def confirm(question, request)
+  "printf 'No\\nYes' | dmenu -p #{question} | grep -qx Yes && sugoictl #{request}"
+end
+key("Mod-Shift-e") { sh confirm("Quit?", "quit") }
+key("Mod-Shift-q") { sh confirm("Close?", "close") }
 key("Mod-Tab") { spawn "sh", "/home/budu/bin/toggle-xkbmap", name: "toggle_xkbmap" }
 
 # Programs, each in its own scope (app-<name>.slice)

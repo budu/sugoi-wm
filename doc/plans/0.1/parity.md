@@ -16,7 +16,7 @@ everything that works today.
 | Mod-Ctrl-Return superkitty   | `spawn`, the chord's only meaning      | M2, decided     |
 | Mod-Ctrl-r restart           | `reload`, or `restart` for a new build | M2              |
 | Mod-Shift-q quit (with no focus) | Mod-Shift-q closes the window      | Dropped, decided |
-| Mod-Shift-e quit, dmenu confirm | `quit`, without the confirmation    | M2; confirm M7  |
+| Mod-Shift-e quit, dmenu confirm | dmenu, then `sugoictl quit`         | M7              |
 | Mod-y overmind restart       | `sh`                                   | M2              |
 | Mod-d, e, i, b apps          | `spawn` thunar, emacs, chromium, ...   | M2              |
 | Mod-z zeditor                | none                                   | Dropped, no Zed |
@@ -38,7 +38,7 @@ and then call `sugoictl` once IPC exists (M7).
 
 | awesome                      | sugoi                                  | Status          |
 |------------------------------|----------------------------------------|-----------------|
-| Mod-Shift-q kill, confirm    | `close`, without the confirmation      | M2; confirm M7  |
+| Mod-Shift-q kill, confirm    | dmenu, then `sugoictl close`           | M7              |
 | Mod-c center                 | center                                 | M3              |
 | Mod-f fullscreen             | fullscreen                             | M3              |
 | Mod-Ctrl-space float toggle  | float toggle                           | M3              |
@@ -82,8 +82,10 @@ and then call `sugoictl` once IPC exists (M7).
 
 ## Outside bindings and rules
 
-- **Autostart** (`awesome.spawn.once("lxpolkit")`): not in the plan; the session script
-  (`.xinitrc`) can start it. Actions run only in blocks today.
 - **Sloppy focus** (`signals.lua`): [F2], M1.
 - **Error handling** (`error-handling.lua`): [L4] and [R1], M2.
-- **Wibar and widgets**: polybar, M7.
+- **Wibar and widgets**: polybar, M7: `contrib/polybar/` keeps the taglist (current
+  and occupied workspaces), the title, the tray, clock, CPU, volume and keyboard
+  layout, and the claude, codex and update widgets through their scripts; their
+  popups become dunst notifications. The tasklist is dropped, as decided.
+- **Autostart** of `lxpolkit`: `contrib/sugoi-session`, with dunst and polybar.
