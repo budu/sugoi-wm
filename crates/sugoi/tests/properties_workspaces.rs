@@ -1,7 +1,8 @@
 //! A history property for workspaces, minimized windows, focus and tiling, against
 //! sugoi in-process on its own Xvfb.
 //!
-//! Generated: sequences of up to 24 operations from a small menu (map a window, close
+//! Generated: sequences of up to 24 operations from a small menu (map a plain window, one
+//! a rule sends to workspace 2 or one a rule floats ([U2], [U3], [U7]), close
 //! one, `workspace` 1 to 3, which cycle on to 11 to 23, `move_to` 1 to 3, back, next,
 //! previous, minimize, restore, focus next, next layout), on at most 6 windows, so
 //! cycling, emptied workspaces and minimized windows on hidden workspaces collide often.
@@ -22,7 +23,7 @@ mod common;
 use common::keycode::*;
 use common::*;
 use proptest::prelude::*;
-use sugoi::{Binding, Choice, Command, Goto, Settings};
+use sugoi::{Binding, Choice, Command, Effects, Goto, Matcher, Rule, Settings};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::xtest::ConnectionExt as _;
@@ -36,9 +37,19 @@ const RIGHT: u8 = 114;
 const N: u8 = 57;
 const SPACE: u8 = 65;
 
+/// What a mapped window is, for the rules in `settings` ([U2], [U3], [U7]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Class {
+    Plain,
+    /// A rule sends it to workspace 2.
+    Elsewhere,
+    /// A rule floats it.
+    Floater,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Op {
-    Map,
+    Map(Class),
     Close(usize),
     /// The app unmaps one of its shown windows (ICCCM withdrawal).
     Withdraw(usize),
@@ -58,7 +69,8 @@ enum Op {
 
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        4 => Just(Op::Map),
+        4 => prop::sample::select(vec![Class::Plain, Class::Plain, Class::Elsewhere, Class::Floater])
+            .prop_map(Op::Map),
         2 => (0usize..MAX_WINDOWS).prop_map(Op::Close),
         1 => (0usize..MAX_WINDOWS).prop_map(Op::Withdraw),
         1 => (0usize..MAX_WINDOWS, 1u32..=3).prop_map(|(i, n)| Op::WithdrawSwitching(i, n)),
@@ -88,6 +100,17 @@ fn settings() -> Settings {
     for (chord, command) in extra {
         settings.keys.push(Binding::commands(chord, vec![command]));
     }
+    let class = |name: &str| Matcher { class: vec![name.into()], ..Matcher::default() };
+    settings.rules = vec![
+        Rule {
+            matcher: class("elsewhere"),
+            effects: Effects { workspace: Some(2), ..Effects::default() },
+        },
+        Rule {
+            matcher: class("floater"),
+            effects: Effects { float: Some(true), ..Effects::default() },
+        },
+    ];
     settings
 }
 
@@ -103,6 +126,7 @@ struct Model {
     window: Window,
     workspace: usize,
     minimized: bool,
+    floating: bool,
 }
 
 /// The reference model: windows in managed order, workspaces as indices 0 to 29.
@@ -261,16 +285,32 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
         let mut expected_focus: Option<Option<Window>> = None;
         let focused = run.observe().focus;
         match op {
-            Op::Map => {
+            Op::Map(class) => {
                 if model.windows.len() == MAX_WINDOWS {
                     continue;
                 }
-                let app = run.session.app(AppSpec::at(0, 0, 100, 100));
+                let spec = AppSpec::at(0, 0, 100, 100);
+                let app = run.session.app(match class {
+                    Class::Plain => spec,
+                    Class::Elsewhere => spec.class("elsewhere", "elsewhere"),
+                    Class::Floater => spec.class("floater", "floater"),
+                });
                 app.map();
                 let window = app.window;
                 run.apps.push(app);
-                model.windows.push(Model { window, workspace: model.current, minimized: false });
-                expected_focus = Some(Some(window));
+                let workspace = if class == Class::Elsewhere { 1 } else { model.current };
+                let floating = class == Class::Floater;
+                model.windows.push(Model { window, workspace, minimized: false, floating });
+                // [F1], or [U7]: a window sent elsewhere leaves the focus where it was.
+                expected_focus = Some(if workspace == model.current {
+                    Some(window)
+                } else {
+                    model
+                        .windows
+                        .iter()
+                        .any(|w| w.window == focused && model.shown(w))
+                        .then_some(focused)
+                });
             }
             Op::Close(i) => {
                 if run.apps.is_empty() {
@@ -460,8 +500,10 @@ fn check(
         model.history.retain(|&w| w != focus);
         model.history.insert(0, focus);
     }
-    // The geometry of the shown windows.
-    let rects: Vec<(i32, i32, u32, u32)> = shown.iter().map(|&w| run.session.outer(w)).collect();
+    // The geometry of the shown windows the layout places ([U3]: floaters float).
+    let tiled: Vec<Window> =
+        model.windows.iter().filter(|w| model.shown(w) && !w.floating).map(|w| w.window).collect();
+    let rects: Vec<(i32, i32, u32, u32)> = tiled.iter().map(|&w| run.session.outer(w)).collect();
     match model.layouts[model.current] {
         Kind::Tile if !rects.is_empty() => {
             let area: u64 = rects.iter().map(|r| u64::from(r.2) * u64::from(r.3)).sum();

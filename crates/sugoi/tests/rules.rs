@@ -57,7 +57,7 @@ fn u2_every_given_matcher_must_match() {
     };
     let session = ruled(vec![Rule { matcher, effects: float() }]);
     let spec = AppSpec { title: Some("Picture-in-Picture"), ..AppSpec::at(100, 100, 200, 100) };
-    let pip = mapped(&session, spec.clone().class("Navigator", "firefox"));
+    let pip = mapped(&session, spec.clone().class("Navigator", "Chromium"));
     let other =
         mapped(&session, AppSpec { title: Some("Mozilla"), ..spec }.class("Navigator", "firefox"));
     eventually("other alone in the layout", || session.outer(other.window) == FULL);
@@ -95,7 +95,13 @@ fn u7_a_window_sent_elsewhere_stays_hidden_and_unfocused() {
     assert_eq!(desktop(&session, chat.window), Some(2));
     settle();
     assert!(!session.viewable(chat.window));
+    // The history property's shrunk case: hidden, so iconic ([V2]).
+    assert_eq!(session.wm_state(chat.window), Some(vec![3, 0]));
     assert_eq!(session.focus(), a.window);
+    // sugoi agrees: closing the focused window closes a, not the hidden one.
+    assert!(session.send(sugoi::Command::CloseFocused));
+    eventually("a closed", || !session.exists(a.window));
+    assert!(session.exists(chat.window));
 }
 
 /// [U3] and [W5]

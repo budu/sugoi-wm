@@ -822,6 +822,11 @@ impl Wm {
             }
             self.arrange()?;
             self.show(window)?;
+            // [V2] A new window starts unmapped, so `show` changes nothing for one a rule
+            // sent elsewhere: its state is set here.
+            if !self.visible(window) {
+                self.set_state(window, desks::ICONIC_STATE)?;
+            }
             // [F1], unless the window went to another workspace ([U7]).
             if self.visible(window) {
                 self.focus(window, true)?;
@@ -917,6 +922,10 @@ impl Wm {
             return Ok(());
         };
         let hints = client.hints;
+        // [V2] A hidden window takes no focus.
+        if !self.visible(window) {
+            return Ok(());
+        }
         if raise {
             self.raise(window)?;
         }
