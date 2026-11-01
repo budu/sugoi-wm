@@ -206,6 +206,47 @@ fn v9_workspaces_survive_a_restart() {
     assert_eq!(desktop(&session, a.window), Some(0));
 }
 
+/// Sets the `_NET_WM_DESKTOP` `app` asks for, then maps its window.
+fn map_on(app: &App, desktop: u32) {
+    use x11rb::wrapper::ConnectionExt as _;
+    let atom = app.atom("_NET_WM_DESKTOP");
+    app.conn
+        .change_property32(PropMode::REPLACE, app.window, atom, AtomEnum::CARDINAL, &[desktop])
+        .unwrap();
+    app.map();
+}
+
+/// [V10]
+#[test]
+fn v10_a_new_window_goes_on_the_workspace_its_app_set() {
+    let session = session();
+    let a = app(&session);
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    map_on(&b, 4);
+    eventually("b managed", || session.wm_state(b.window).is_some());
+    assert_eq!(desktop(&session, b.window), Some(4));
+    assert_eq!(session.wm_state(b.window), Some(vec![3, 0]));
+    assert!(!session.viewable(b.window));
+    assert_eq!(session.focus(), a.window);
+    assert_eq!(current(&session), Some(0));
+    go(&session, Goto::Number(5));
+    eventually("b shows on 5", || session.viewable(b.window));
+}
+
+/// [V10]
+#[test]
+fn v10_an_invalid_workspace_is_the_current_one() {
+    let session = session();
+    go(&session, Goto::Number(2));
+    eventually("on 2", || current(&session) == Some(1));
+    for asked in [30, 0xFFFF_FFFF] {
+        let a = session.app(AppSpec::at(0, 0, 200, 100));
+        map_on(&a, asked);
+        eventually("focused", || session.focus() == a.window);
+        assert_eq!(desktop(&session, a.window), Some(1));
+    }
+}
+
 /// [V2] and [M4], the property's shrunk case: an app withdraws its window while sugoi
 /// still has a switch to handle, so sugoi's own unmap finds it unmapped already.
 #[test]

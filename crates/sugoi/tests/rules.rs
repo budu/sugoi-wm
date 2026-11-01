@@ -187,3 +187,19 @@ fn u6_an_adopted_window_keeps_its_workspace_over_a_rule() {
     assert_eq!(desktop(&session, chat.window), Some(0));
     assert!(session.viewable(chat.window));
 }
+
+/// [U6] and [V10]
+#[test]
+fn u6_a_rule_puts_a_new_window_elsewhere_than_its_app_asks() {
+    let effects = Effects { workspace: Some(3), ..Effects::default() };
+    let session = ruled(vec![Rule { matcher: class("chat"), effects }]);
+    let chat = session.app(AppSpec::at(0, 0, 200, 100).class("chat", "chat"));
+    let atom = chat.atom("_NET_WM_DESKTOP");
+    chat.conn
+        .change_property32(PropMode::REPLACE, chat.window, atom, AtomEnum::CARDINAL, &[1])
+        .unwrap();
+    chat.map();
+    eventually("chat on 3", || desktop(&session, chat.window) == Some(2));
+    settle();
+    assert_eq!(desktop(&session, chat.window), Some(2));
+}

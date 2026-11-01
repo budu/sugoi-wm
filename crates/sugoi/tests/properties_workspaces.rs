@@ -2,13 +2,14 @@
 //! sugoi in-process on its own Xvfb.
 //!
 //! Generated: sequences of up to 24 operations from a small menu (map a plain window, one
-//! a rule sends to workspace 2 or one a rule floats ([U2], [U3], [U7]), close
+//! a rule sends to workspace 2 or one a rule floats ([U2], [U3], [U7]), each maybe
+//! asking for workspace 1, 2, 3 or an invalid one, by property or message ([V10]), close
 //! one, `workspace` 1 to 3, which cycle on to 11 to 23, `move_to` 1 to 3, back, next,
 //! previous, minimize, restore, focus next, next layout), on at most 6 windows, so
 //! cycling, emptied workspaces and minimized windows on hidden workspaces collide often.
 //!
 //! Checked after every operation, against a reference model written from the specs:
-//! the current workspace ([V4] to [V6]); for each window, its workspace ([V8], [V9]),
+//! the current workspace ([V4] to [V6]); for each window, its workspace ([V8] to [V10]),
 //! whether it shows and its `WM_STATE` ([V2], [W6]); the focus: exactly the window the
 //! spec names after a map ([F1]), focus next ([D5]), a switch ([V7]) or a restore
 //! ([W6]), and some shown window, or the root without one, after a close, minimize or
@@ -47,9 +48,17 @@ enum Class {
     Floater,
 }
 
+/// [V10] The workspace index an app asks for before mapping its window, and how.
+#[derive(Clone, Copy, Debug)]
+enum Asked {
+    Nothing,
+    Property(u32),
+    Message(u32),
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Op {
-    Map(Class),
+    Map(Class, Asked),
     Close(usize),
     /// The app unmaps one of its shown windows (ICCCM withdrawal).
     Withdraw(usize),
@@ -69,8 +78,11 @@ enum Op {
 
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        4 => prop::sample::select(vec![Class::Plain, Class::Plain, Class::Elsewhere, Class::Floater])
-            .prop_map(Op::Map),
+        4 => (
+            prop::sample::select(vec![Class::Plain, Class::Plain, Class::Elsewhere, Class::Floater]),
+            asked(),
+        )
+            .prop_map(|(class, asked)| Op::Map(class, asked)),
         2 => (0usize..MAX_WINDOWS).prop_map(Op::Close),
         1 => (0usize..MAX_WINDOWS).prop_map(Op::Withdraw),
         1 => (0usize..MAX_WINDOWS, 1u32..=3).prop_map(|(i, n)| Op::WithdrawSwitching(i, n)),
@@ -83,6 +95,16 @@ fn op() -> impl Strategy<Value = Op> {
         2 => Just(Op::Restore),
         2 => Just(Op::FocusNext),
         1 => Just(Op::LayoutNext),
+    ]
+}
+
+/// Mostly nothing; otherwise workspace 1 to 3, or 30 (invalid).
+fn asked() -> impl Strategy<Value = Asked> {
+    let index = prop::sample::select(vec![0u32, 1, 2, 30]);
+    prop_oneof![
+        2 => Just(Asked::Nothing),
+        1 => index.clone().prop_map(Asked::Property),
+        1 => index.prop_map(Asked::Message),
     ]
 }
 
@@ -285,7 +307,7 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
         let mut expected_focus: Option<Option<Window>> = None;
         let focused = run.observe().focus;
         match op {
-            Op::Map(class) => {
+            Op::Map(class, asked) => {
                 if model.windows.len() == MAX_WINDOWS {
                     continue;
                 }
@@ -295,10 +317,39 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                     Class::Elsewhere => spec.class("elsewhere", "elsewhere"),
                     Class::Floater => spec.class("floater", "floater"),
                 });
+                let atom = app.atom("_NET_WM_DESKTOP");
+                let index = match asked {
+                    Asked::Nothing => None,
+                    Asked::Property(index) => {
+                        app.conn
+                            .change_property32(
+                                PropMode::REPLACE,
+                                app.window,
+                                atom,
+                                AtomEnum::CARDINAL,
+                                &[index],
+                            )
+                            .unwrap();
+                        Some(index as usize)
+                    }
+                    Asked::Message(index) => {
+                        let event =
+                            ClientMessageEvent::new(32, app.window, atom, [index, 1, 0, 0, 0]);
+                        let mask =
+                            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY;
+                        app.conn.send_event(false, run.session.root, mask, event).unwrap();
+                        Some(index as usize)
+                    }
+                };
                 app.map();
                 let window = app.window;
                 run.apps.push(app);
-                let workspace = if class == Class::Elsewhere { 1 } else { model.current };
+                // [U6] A rule's workspace, then the app's if valid, then the current.
+                let workspace = match index {
+                    _ if class == Class::Elsewhere => 1,
+                    Some(index) if index < 30 => index,
+                    _ => model.current,
+                };
                 let floating = class == Class::Floater;
                 model.windows.push(Model { window, workspace, minimized: false, floating });
                 // [F1], or [U7]: a window sent elsewhere leaves the focus where it was.

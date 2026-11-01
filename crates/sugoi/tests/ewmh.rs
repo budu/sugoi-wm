@@ -187,6 +187,22 @@ fn e9_a_bar_switches_workspaces_and_moves_windows() {
     assert_eq!(values(&session, a.window, "_NET_WM_DESKTOP"), [2]);
 }
 
+/// [E9] and [V10]
+#[test]
+fn e9_a_message_before_mapping_says_where_the_window_goes() {
+    let session = session();
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    let event =
+        ClientMessageEvent::new(32, a.window, session.atom("_NET_WM_DESKTOP"), [3, 1, 0, 0, 0]);
+    let mask = EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY;
+    a.conn.send_event(false, session.root, mask, event).unwrap();
+    a.map();
+    eventually("a managed", || !values(&session, a.window, "WM_STATE").is_empty());
+    assert_eq!(values(&session, a.window, "_NET_WM_DESKTOP"), [3]);
+    assert!(!session.viewable(a.window));
+    assert_eq!(values(&session, session.root, "_NET_CURRENT_DESKTOP"), [0]);
+}
+
 /// [E10]
 #[test]
 fn e10_a_pager_closes_a_window() {
