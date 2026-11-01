@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Rules and hooks** (M5). `rule class: "Thunar", float: true` and the like match
+  windows by class, instance, title, type or transience, and float, size, center,
+  raise, make master or send them to a workspace; dialogs, transients, splash and
+  utility windows float by default. `on(:manage)`, `:focus`, `:unmanage` and
+  `:workspace` run Ruby blocks with read-only windows. See `doc/spec/rules.md`.
 - **Workspaces** (M4). 30 workspaces in 3 banks of 10: Mod-n goes to n, then n+10 and
   n+20 when pressed again; Mod-Shift-n moves the focused window the same way; next,
   previous and back; a layout per workspace. Workspaces survive a restart. See

@@ -8,6 +8,7 @@ section.
 
 | Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
 |-----------|------------|------------|-------|---------|---------|----------------------|
+| M5        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 160/160 | 19 fixed, 1 declined |
 | M4        | 2026-11-01 | 2026-11-01 | 0.5   | 8       | 139/139 | 18 fixed, 1 declined |
 | M3        | 2026-11-01 | 2026-11-01 | 0.6   | 7       | 114/114 | 19 fixed, 1 declined |
 | M2        | 2026-10-31 | 2026-10-31 | 0.5   | 7       | 68/68   | 17 fixed, 2 declined |
@@ -27,6 +28,51 @@ Measured once, at the release (M8): RSS and idle CPU of the WM process. Referenc
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
 ## Entries
+
+### M5 Rules and hooks
+
+Status: closed 2026-11-01, on `m5-rules`, awaiting merge. No benchmarks: the
+footprint is measured at the release.
+
+- **Research.** The live session's `WM_CLASS` values match the awesome rules' names
+  (`Emacs`, `firefox`, `Chromium`, `kitty`). Zed's class could not be read: it needs
+  DRI3, which Xvfb lacks, and its desktop file names none; an app setting its class
+  after the map would explain the awesome rule's FIXME, so rules apply again on a
+  `WM_CLASS` change.
+- **Decisions.** Rules are data matched in Rust, hooks are Ruby blocks; exact strings
+  or lists, no regular expressions; manage hooks only for new windows; no hooks during
+  a hook's actions; focus, unmanage and workspace hooks run after their event or
+  action; adopted windows keep their geometry; hidden windows refuse the focus. All in
+  the [decision notes](../notes.md#rules).
+- **Changes.** `doc/spec/rules.md` with 11 behaviors; `wm/rules.rs`; the DSL's `rule`,
+  `on`, `Sugoi::Window` and `windows`; `doc/config.rb` ports the 8 custom awesome
+  rules and the second-browser hook. Code: 3,605 lines (2,846 after M4); tests: 3,565
+  lines (3,092).
+- **Tests.** 11 rule cases in-process; hook cases run the binary (47 config cases in
+  all). The history property gains maps that rules send to workspace 2 or float, and
+  found a real defect on its first history, `[Map(Elsewhere)]`: such a window kept
+  `NormalState` while hidden.
+- **Mutations.** Of 13, 11 of the 12 that applied failed a case; the two gaps (an
+  any-of matcher tried only on its first value, a hidden window focused in sugoi's
+  state) got stronger cases.
+- **Review.** `/code-review high` on the branch, then on the fixes.
+
+  | Round     | P1 | P2 | P3 | Resolution                          |
+  |-----------|---:|---:|---:|-------------------------------------|
+  | Review    |  0 |  5 |  5 | 10 fixed in `0f02655`               |
+  | Re-review |  0 |  1 |  9 | 9 fixed in `cbde9c8`, 1 kept        |
+
+  The P2s: workspace and focus hooks ran before their event was done (acting on a
+  hidden window, or with the pointer frozen by a click); a reload in a hook ran stale
+  blocks; `window.center` and `size` did not float; restarts re-applied rule
+  geometry; a reload dropped other events' queued hooks. Each has a case that fails on
+  the code before its fix. Kept by decision: deferred hooks see the state after the
+  whole action, now in [H1].
+- **Long runs.** `scripts/proptest-long`: 160 tests, 160 passed, in 1 min 33 s at
+  scale 20. The leaky test of M4 was the scope case's deliberately orphaned `sleep`;
+  the case now ends it (`e0662cd`), and it is no longer leaky.
+- **Left open.** Zed's actual `WM_CLASS` (the user's `xprop` can tell); EWMH (M7).
+- **Hours.** 0.4 (main thread 0.4, background 0.0), from `agent-hours`.
 
 ### M4 Workspaces
 
