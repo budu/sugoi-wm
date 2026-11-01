@@ -6,10 +6,11 @@ section.
 
 ## Milestones
 
-| Milestone | Started    | Closed     | Hours | Commits | Tests | Findings             |
-|-----------|------------|------------|-------|---------|-------|----------------------|
-| M2        | 2026-10-31 | 2026-10-31 | 0.5   | 7       | 68/68 | 17 fixed, 2 declined |
-| M1        | 2026-10-31 | 2026-10-31 | 0.5   | 8       | 33/33 | 14 fixed, 3 declined |
+| Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
+|-----------|------------|------------|-------|---------|---------|----------------------|
+| M3        | 2026-11-01 | 2026-11-01 | 0.6   | 7       | 114/114 | 19 fixed, 1 declined |
+| M2        | 2026-10-31 | 2026-10-31 | 0.5   | 7       | 68/68   | 17 fixed, 2 declined |
+| M1        | 2026-10-31 | 2026-10-31 | 0.5   | 8       | 33/33   | 14 fixed, 3 declined |
 
 Hours are active agent hours from `agent-hours` (the milestones skill's script); each
 entry splits them into main thread and background. Findings count both review rounds;
@@ -22,6 +23,52 @@ Measured once, at the release (M8): RSS and idle CPU of the WM process. Referenc
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
 ## Entries
+
+### M3 Layouts
+
+Status: closed 2026-11-01, on `m3-layouts`, awaiting merge. No benchmarks: the
+footprint is measured at the release.
+
+- **Research.** The awesome theme has no gaps, and its steps are 0.05 for the master
+  width and a window's height. Two findings shaped the design: under sloppy focus,
+  every re-tile would hand the focus to whatever slid under the resting pointer, and
+  minimizing needs sugoi's own unmaps told apart from withdrawals, as M4's hidden
+  workspaces will. App fullscreen requests (F11) stay with EWMH in M7.
+- **Decisions.** Crossings caused by sugoi's moves are dropped, and the pointer wins
+  after a close by an explicit query; floating and placed geometry are kept apart;
+  geometry actions float a tiled window; sugoi's unmaps are counted; size hints are
+  ignored when tiling; stack shares are weights balanced to an average of 1.0. All in
+  the [decision notes](../notes.md#layouts).
+- **Changes.** `doc/spec/layouts.md` with 21 behaviors, core's [M3] and [F5] updated;
+  `layout.rs` (pure geometry) and `wm/place.rs`; the DSL's `layouts`, `master`,
+  `layout`, `master_width`, `window_height`, `toggle`, `minimize`, `restore`, `center`,
+  `move` and `resize`; `doc/config.rb` ports the awesome layout, state and mouse
+  bindings. Code: 2,527 lines (1,574 after M2); tests: 2,103 lines (1,500).
+- **Tests.** 29 layout cases run in-process with fixed settings, `Handle` commands and
+  XTEST drags; core cases moved to the float layout, and test windows give a user
+  position. 33 core, 35 config, 29 layout cases and 17 unit tests.
+- **Mutations.** Of 14, 12 failed a case at first; checks were added for the resize
+  warp and a client withdrawing a minimized window. One still survives: the synthetic
+  unmap branch, which matters only while one of sugoi's unmaps is pending, a race a
+  case cannot stage.
+- **Review.** `/code-review high` on the branch, then on the fixes.
+
+  | Round     | P1 | P2 | P3 | Resolution                          |
+  |-----------|---:|---:|---:|-------------------------------------|
+  | Review    |  1 |  4 |  5 | 10 fixed in `0af7443`               |
+  | Re-review |  0 |  3 |  7 | 9 fixed in `5c9058a`, 1 declined    |
+
+  The P1: a config master width above 1.0 underflowed and ended sugoi. The P2s: drags
+  took the focused window, not the clicked one, nor only the current press; a client
+  re-mapping its minimized window stayed minimized; stack shares drifted, giving new
+  windows arbitrary heights and others less than the floor; a no-op request from a
+  floating window got no reply. Each has a case that fails on the previous code.
+  Declined: removing the clamp in `tile()`, a cheap guard on that crash path.
+- **Long runs.** Config passed 30 of 30 runs and the other suites 20 of 20, after the
+  harness's `sync` began waiting for its marker to vanish (a full-screen marker made
+  d6 fail once in 20).
+- **Left open.** App fullscreen requests and `_NET_WM_STATE` wait for M7, as planned.
+- **Hours.** 0.6 (main thread 0.6, background 0.0), from `agent-hours`.
 
 ### M2 Ruby config
 

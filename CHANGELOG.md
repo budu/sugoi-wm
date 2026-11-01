@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Layouts and window states** (M3). Tile (master on the right, 0.5 wide), max and
+  float; master width and stack shares; floating, maximized, fullscreen, on-top and
+  minimized windows; centering with an optional size; Mod-drag move and resize.
+  Re-tiling never moves the focus. See `doc/spec/layouts.md`.
 - **Ruby configuration** (M2). `~/.config/sugoi/config.rb` (or `--config`) sets the
   border, the modkey, key, button and root-button chords bound to Ruby blocks, and the
   actions focus, swap, close, spawn, sh, reload, restart and quit. Errors keep the
