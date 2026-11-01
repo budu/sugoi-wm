@@ -1,0 +1,3 @@
+[env]
+# Link the system (pacman) Ruby, not the one first on PATH: see doc/plans/notes.md.
+RUBY = "/usr/bin/ruby"
