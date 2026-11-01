@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Workspaces apps ask for** (M8). A new window goes on the workspace its app asks
+  for through `_NET_WM_DESKTOP` (Firefox restoring its session), unless a rule says
+  otherwise. See [V10] in `doc/spec/workspaces.md`.
 - **EWMH and IPC** (M7). Bars and pagers see the windows, the active window, 30 named
   workspaces and the work area; docks reserve their edges; apps can go fullscreen
   (F11), pagers switch and activate. `sugoictl "<ruby>"` runs Ruby in sugoi through

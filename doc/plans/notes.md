@@ -127,6 +127,10 @@ each section.
   fullscreen still covers the whole screen. polybar maps its bar as a dock.
 - **`_NET_CURRENT_DESKTOP` requests are exact** (M7): a bar's click on 3 goes to 3, even
   from 3, unlike `workspace 3`, which cycles.
+- **Apps choose a new window's workspace** (M8, user, 2026-11-01). Firefox restores
+  each window's workspace (its session's `workspaceID`) through `_NET_WM_DESKTOP`, as
+  awesome honors; sugoi honors it set before mapping, and a message sent before then
+  is written as that property. A rule's `workspace:` still wins, as the user's choice.
 - **Requests are Ruby** (M7). One socket verb does all: actions, queries and anything
   the config can do, with the 1 s limit; the user is the socket's only client
   (0600), so it opens nothing the config does not already.

@@ -216,6 +216,16 @@ impl Wm {
             self.switch(Goto::Index(data[0] as usize))
         } else if e.type_ == a._NET_WM_DESKTOP && managed {
             self.move_to_index(e.window, data[0] as usize)
+        } else if e.type_ == a._NET_WM_DESKTOP
+            && e.window != self.root
+            && !self.docks.contains_key(&e.window)
+        {
+            // [V10] Before the window maps, the property says where it goes, as if its
+            // app had set it.
+            match data[0] as usize {
+                index if index < COUNT => self.set_desktop(e.window, index),
+                _ => Ok(()),
+            }
         } else if e.type_ == a._NET_CLOSE_WINDOW && managed {
             self.close(e.window)
         } else {

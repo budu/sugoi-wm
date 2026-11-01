@@ -882,13 +882,10 @@ impl Wm {
         // [E5] A state the app set before mapping it (`mpv --fs`).
         let (net_state, atom) = (self.atoms._NET_WM_STATE, AtomEnum::ATOM);
         let initial = self.conn.get_property(false, window, net_state, atom, 0, 32)?;
-        // [V9] An adopted window goes back on its workspace; a new one on the current.
+        // [V9] An adopted window goes back on its workspace; [V10] a new one on the one
+        // its app asked for, or the current.
         let (atom, cardinal) = (self.atoms._NET_WM_DESKTOP, AtomEnum::CARDINAL);
-        let kept = if map {
-            None
-        } else {
-            Some(self.conn.get_property(false, window, atom, cardinal, 0, 1)?)
-        };
+        let kept = self.conn.get_property(false, window, atom, cardinal, 0, 1)?;
         let info = self.read_info(info)?;
         // [E4] A bar is mapped, never managed.
         if info.kind == Some(WindowType::Dock) {
@@ -913,7 +910,7 @@ impl Wm {
             state,
             &[NORMAL_STATE, NONE],
         )?;
-        let kept = kept.map(|cookie| desks::desktop(cookie.reply())).transpose()?.flatten();
+        let kept = desks::desktop(kept.reply())?;
         let workspace = kept.unwrap_or(self.current);
         self.set_desktop(window, workspace)?;
         // The window's border becomes sugoi's; its inner size stays.
@@ -953,7 +950,7 @@ impl Wm {
             self.set_flag(window, state, Some(true));
         }
         // [U6] [U7] Rules before the window shows; the manage hooks for new windows.
-        self.apply_rules(window, !map, kept.is_some())?;
+        self.apply_rules(window, !map, !map && kept.is_some())?;
         if map {
             let snapshot = self.snapshot(window);
             self.run_hooks(HookEvent::Manage, HookArg::Window(snapshot))?;
