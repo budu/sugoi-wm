@@ -800,3 +800,47 @@ fn a4_kill_closes_when_systemctl_fails() {
     eventually("closed", || !scope.running());
     assert!(!scope.killed());
 }
+
+fn socket(session: &Session) -> std::path::PathBuf {
+    let path = sugoictl::socket_path(&session.x.display).expect("XDG_RUNTIME_DIR is set");
+    eventually("socket", || path.exists());
+    path
+}
+
+/// [I2] Requests run Ruby with actions and queries.
+#[test]
+fn i2_requests_run_actions_and_queries() {
+    let session = Session::with_config("");
+    let app = session.app(AppSpec::at(0, 0, 200, 100).class("kitty", "kitty"));
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    let path = socket(&session);
+    let classes = sugoictl::request(&path, "windows.map(&:class_name)").unwrap();
+    assert_eq!(classes, sugoictl::Reply::Ok("[\"kitty\"]".into()));
+    let switched = sugoictl::request(&path, "workspace 3").unwrap();
+    assert_eq!(switched, sugoictl::Reply::Ok("nil".into()));
+    eventually("hidden on 1", || !session.viewable(app.window));
+    let failed = sugoictl::request(&path, "workspace 31").unwrap();
+    let sugoictl::Reply::Error(message) = failed else { panic!("{failed:?}") };
+    assert!(message.contains("workspaces are numbered 1 to 30"), "{message}");
+}
+
+/// [I2] A quit is answered, then sugoi exits.
+#[test]
+fn i2_quit_answers_then_exits() {
+    let mut session = Session::with_config("");
+    let path = socket(&session);
+    assert_eq!(sugoictl::request(&path, "quit").unwrap(), sugoictl::Reply::Ok("nil".into()));
+    eventually("exited", || session.binary().status().is_some());
+    assert!(session.binary().status().unwrap().success());
+}
+
+/// [I1] Spawned apps know where the socket is.
+#[test]
+fn i1_spawned_apps_get_the_socket() {
+    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"app\" }\n");
+    let path = socket(&session);
+    session.keys(&[SUPER, X]);
+    let expected = format!("SUGOI_SOCKET={}", path.display());
+    eventually("env", || session.binary().log("env.log") == [expected.clone()]);
+}

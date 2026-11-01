@@ -150,8 +150,14 @@ impl Binary {
         let bin = dir.join("bin");
         fs::create_dir_all(&bin).unwrap();
         // systemd-run's stub runs `sleep`, so a test can see whose child the app is.
-        let exec_sleep = "while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
-                          [ \"$2\" = sleep ] && shift && exec \"$@\"\n";
+        let env_log = dir.join("env.log");
+        let exec_sleep = format!(
+            "printf 'SUGOI_SOCKET=%s\\n' \"$SUGOI_SOCKET\" >> '{}'\n\
+             while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
+             [ \"$2\" = sleep ] && shift && exec \"$@\"\n",
+            env_log.display()
+        );
+        let exec_sleep = exec_sleep.as_str();
         let stubs = [("systemd-run", "spawn.log", exec_sleep), ("notify-send", "notify.log", "")];
         for (stub, log, tail) in stubs {
             let log = dir.join(log);
