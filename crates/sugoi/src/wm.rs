@@ -384,8 +384,10 @@ impl Wm {
             ];
             let mut timeout = None;
             if let Some(server) = &self.ipc {
-                fds.push(PollFd::new(&server.listener, PollFlags::IN));
-                fds.extend(server.clients.iter().map(|c| PollFd::new(&c.stream, PollFlags::IN)));
+                if server.accepting() {
+                    fds.push(PollFd::new(&server.listener, PollFlags::IN));
+                }
+                fds.extend(server.clients.iter().map(|c| PollFd::new(&c.stream, c.interest())));
                 timeout = server.timeout().map(|d| {
                     rustix::event::Timespec::try_from(d)
                         .unwrap_or(rustix::event::Timespec { tv_sec: 1, tv_nsec: 0 })
@@ -877,6 +879,9 @@ impl Wm {
         let geometry = self.conn.get_geometry(window)?;
         let size_hints = WmSizeHints::get_normal_hints(&self.conn, window)?;
         let info = self.request_info(window, true)?;
+        // [E5] A state the app set before mapping it (`mpv --fs`).
+        let (net_state, atom) = (self.atoms._NET_WM_STATE, AtomEnum::ATOM);
+        let initial = self.conn.get_property(false, window, net_state, atom, 0, 32)?;
         // [V9] An adopted window goes back on its workspace; a new one on the current.
         let (atom, cardinal) = (self.atoms._NET_WM_DESKTOP, AtomEnum::CARDINAL);
         let kept = if map {
@@ -887,7 +892,7 @@ impl Wm {
         let info = self.read_info(info)?;
         // [E4] A bar is mapped, never managed.
         if info.kind == Some(WindowType::Dock) {
-            drop((geometry, size_hints, kept));
+            drop((geometry, size_hints, kept, initial));
             return self.add_dock(window, map);
         }
         let Some(hints) = self.read_hints(window)? else {
@@ -940,6 +945,22 @@ impl Wm {
         self.order.push(window);
         self.history.push(window);
         self.stack.push(window);
+        let initial: Vec<Atom> = vanished(initial.reply())?
+            .and_then(|r| r.value32().map(|v| v.collect()))
+            .unwrap_or_default();
+        for atom in initial {
+            let state = match atom {
+                a if a == self.atoms._NET_WM_STATE_FULLSCREEN => crate::State::Fullscreen,
+                a if a == self.atoms._NET_WM_STATE_ABOVE => crate::State::OnTop,
+                a if a == self.atoms._NET_WM_STATE_MAXIMIZED_VERT
+                    || a == self.atoms._NET_WM_STATE_MAXIMIZED_HORZ =>
+                {
+                    crate::State::Maximized
+                }
+                _ => continue,
+            };
+            self.set_flag(window, state, Some(true));
+        }
         // [U6] [U7] Rules before the window shows; the manage hooks for new windows.
         self.apply_rules(window, !map, kept.is_some())?;
         if map {
@@ -980,7 +1001,13 @@ impl Wm {
         if !destroyed {
             // Withdrawn windows may be reused (a tray icon): leave nothing of sugoi's.
             self.conn.delete_property(window, self.atoms.WM_STATE)?;
-            self.conn.delete_property(window, self.atoms._NET_WM_DESKTOP)?;
+            for property in [
+                self.atoms._NET_WM_DESKTOP,
+                self.atoms._NET_WM_STATE,
+                self.atoms._NET_WM_ALLOWED_ACTIONS,
+            ] {
+                self.conn.delete_property(window, property)?;
+            }
             self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
             let selection = ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT);
             self.conn.change_window_attributes(window, &selection)?;

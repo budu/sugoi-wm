@@ -19,12 +19,31 @@ pub(super) struct Server {
     pub(super) listener: UnixListener,
     pub(super) path: PathBuf,
     pub(super) clients: Vec<Client>,
+    /// After an accept error (too many open files), the listener rests a while, or it
+    /// would stay readable and spin the loop.
+    paused_until: Option<Instant>,
+    next_id: u64,
 }
 
+/// A client reads its request, then gets its reply, both without blocking sugoi.
 pub(super) struct Client {
+    id: u64,
     pub(super) stream: UnixStream,
     request: Vec<u8>,
+    /// The reply and how much of it is written; `None` while the request comes in.
+    reply: Option<(Vec<u8>, usize)>,
     deadline: Instant,
+}
+
+impl Client {
+    /// What the client waits for: to send, or to be sent to.
+    pub(super) fn interest(&self) -> rustix::event::PollFlags {
+        if self.reply.is_some() {
+            rustix::event::PollFlags::OUT
+        } else {
+            rustix::event::PollFlags::IN
+        }
+    }
 }
 
 impl Server {
@@ -46,7 +65,7 @@ impl Server {
         match open() {
             Ok(listener) => {
                 info!("listening on {}", path.display());
-                Some(Server { listener, path, clients: Vec::new() })
+                Some(Server { listener, path, clients: Vec::new(), paused_until: None, next_id: 0 })
             }
             Err(e) => {
                 warn!("no IPC socket at {}: {e}", path.display());
@@ -55,10 +74,16 @@ impl Server {
         }
     }
 
-    /// The nearest client deadline, for the event loop's wait.
+    /// The nearest deadline, for the event loop's wait.
     pub(super) fn timeout(&self) -> Option<Duration> {
         let now = Instant::now();
-        self.clients.iter().map(|c| c.deadline.saturating_duration_since(now)).min()
+        let deadlines = self.clients.iter().map(|c| c.deadline).chain(self.paused_until);
+        deadlines.map(|d| d.saturating_duration_since(now)).min()
+    }
+
+    /// Whether the listener belongs in the event loop's wait.
+    pub(super) fn accepting(&self) -> bool {
+        self.paused_until.is_none_or(|until| Instant::now() >= until)
     }
 }
 
@@ -69,41 +94,80 @@ impl Drop for Server {
 }
 
 impl Wm {
-    /// [I2] [I4] Accepts clients, reads what they sent, and answers those done sending;
-    /// clients past their deadline are dropped.
+    /// [I2] [I4] Accepts clients, reads requests, answers the complete ones and writes
+    /// replies as far as the sockets take them; clients past their deadline are dropped.
     pub(super) fn serve_ipc(&mut self) -> Result<(), Error> {
         let Some(server) = self.ipc.as_mut() else { return Ok(()) };
-        while let Ok((stream, _)) = server.listener.accept() {
-            if stream.set_nonblocking(true).is_ok() {
-                let deadline = Instant::now() + DEADLINE;
-                server.clients.push(Client { stream, request: Vec::new(), deadline });
+        let now = Instant::now();
+        if server.accepting() {
+            server.paused_until = None;
+            loop {
+                match server.listener.accept() {
+                    Ok((stream, _)) => {
+                        if stream.set_nonblocking(true).is_ok() {
+                            server.next_id += 1;
+                            server.clients.push(Client {
+                                id: server.next_id,
+                                stream,
+                                request: Vec::new(),
+                                reply: None,
+                                deadline: now + DEADLINE,
+                            });
+                        }
+                    }
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                    Err(e) => {
+                        warn!("IPC accept: {e}");
+                        server.paused_until = Some(now + DEADLINE);
+                        break;
+                    }
+                }
             }
         }
-        let mut done = Vec::new();
-        let now = Instant::now();
-        server.clients.retain_mut(|client| {
+        // Requests the clients finished sending: they shut their writing side.
+        let mut complete = Vec::new();
+        for client in server.clients.iter_mut().filter(|c| c.reply.is_none()) {
             let mut bytes = [0; 4096];
             loop {
                 match client.stream.read(&mut bytes) {
-                    // The client shut its writing side: the request is complete.
                     Ok(0) => {
-                        done.push((client.stream.try_clone(), std::mem::take(&mut client.request)));
-                        return false;
+                        complete.push((client.id, std::mem::take(&mut client.request)));
+                        break;
                     }
                     Ok(n) => client.request.extend_from_slice(&bytes[..n]),
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => return now < client.deadline,
-                    Err(_) => return false,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                    Err(_) => {
+                        client.deadline = now;
+                        break;
+                    }
                 }
             }
-        });
-        for (stream, request) in done {
-            let reply = self.answer(&String::from_utf8_lossy(&request))?;
-            if let Ok(mut stream) = stream {
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_write_timeout(Some(DEADLINE));
-                let _ = stream.write_all(&encode(&reply));
+        }
+        for (id, request) in complete {
+            let reply = encode(&self.answer(&String::from_utf8_lossy(&request))?);
+            let server = self.ipc.as_mut().expect("the server is still there");
+            if let Some(client) = server.clients.iter_mut().find(|c| c.id == id) {
+                client.reply = Some((reply, 0));
+                client.deadline = Instant::now() + DEADLINE;
             }
         }
+        let server = self.ipc.as_mut().expect("the server is still there");
+        let now = Instant::now();
+        server.clients.retain_mut(|client| {
+            if let Some((reply, written)) = &mut client.reply {
+                while *written < reply.len() {
+                    match client.stream.write(&reply[*written..]) {
+                        Ok(n) => *written += n,
+                        Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                        Err(_) => return false,
+                    }
+                }
+                if *written == reply.len() {
+                    return false;
+                }
+            }
+            now < client.deadline
+        });
         Ok(())
     }
 

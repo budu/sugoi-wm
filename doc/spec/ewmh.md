@@ -19,12 +19,15 @@ the identifiers in brackets.
 - **[E4] Work area.** Windows of type `_NET_WM_WINDOW_TYPE_DOCK` (a bar) are mapped but
   not managed: no border, focus, layout or workspace. Their `_NET_WM_STRUT_PARTIAL`, or
   `_NET_WM_STRUT`, reserves screen edges; the work area ([Y1]) is the screen less what
-  every dock reserves, and the root's `_NET_WORKAREA` gives it for each workspace. It
-  follows docks mapping, unmapping and changing their struts.
+  every dock reserves (a strut past the screen leaves at least a pixel), and the root's
+  `_NET_WORKAREA` gives it for each workspace. It follows docks mapping, unmapping and
+  changing their struts. Docks stack above every managed window but a fullscreen one.
 - **[E5] Window states.** `_NET_WM_STATE` lists, for each managed window,
   `_NET_WM_STATE_FULLSCREEN`, `_NET_WM_STATE_ABOVE` (on top), `_NET_WM_STATE_HIDDEN`
   (minimized or on another workspace), and `_NET_WM_STATE_MAXIMIZED_VERT` and `_HORZ`
-  (maximized), as [W3] to [W6] set them.
+  (maximized), as [W3] to [W6] set them. A window mapped with fullscreen, above or
+  maximized in its `_NET_WM_STATE` starts in those states (`mpv --fs`). Withdrawn
+  windows lose `_NET_WM_STATE` and `_NET_WM_ALLOWED_ACTIONS`, as `_NET_WM_DESKTOP`.
 - **[E6] Allowed actions.** `_NET_WM_ALLOWED_ACTIONS` lists move, resize, fullscreen,
   maximize, minimize, close and change desktop for every managed window.
 
@@ -33,8 +36,10 @@ the identifiers in brackets.
 - **[E7] State requests.** A client message `_NET_WM_STATE` (remove 0, add 1, toggle 2)
   for fullscreen, above or the two maximized states changes them as [W3] to [W5] do;
   an app's fullscreen (F11) works this way. Other states are ignored.
-- **[E8] Activation.** `_NET_ACTIVE_WINDOW` for a managed window switches to its
-  workspace, restores it if minimized, and focuses and raises it.
+- **[E8] Activation.** `_NET_ACTIVE_WINDOW` from a pager or the user (source 2) for a
+  managed window switches to its workspace, restores it if minimized, and focuses and
+  raises it. From an app (source 1, or 0 from old clients) it only focuses a window
+  already shown: an app cannot pull the user to another workspace.
 - **[E9] Desktops.** `_NET_CURRENT_DESKTOP` with n switches to workspace n + 1, as the
   numbers 11 to 30 do ([V4]), including from a bar's clicks and scrolls;
   `_NET_WM_DESKTOP` moves a window there.
@@ -52,5 +57,6 @@ the identifiers in brackets.
 - **[I3] sugoictl.** `sugoictl <ruby>` sends the request, prints the reply, and exits 0,
   or prints the error and exits 1; without a reachable sugoi it exits 2.
 - **[I4] Many clients.** Requests from several clients are served one at a time, in
-  the event loop; a client that sends nothing or reads nothing for 1 s is dropped,
-  and never stops sugoi.
+  the event loop, which neither waits on a client's request nor on its reading the
+  reply; a client that sends nothing or reads nothing for 1 s is dropped. A request's
+  `inspect` is within the 1 s limit too.

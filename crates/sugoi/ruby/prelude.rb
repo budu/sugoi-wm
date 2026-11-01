@@ -275,8 +275,9 @@ module Sugoi
     def eval_request(code, windows)
       @queue = []
       @windows = windows.map { |w| Window.new(*w) }.freeze
-      value = Timeout.timeout(TIME_LIMIT) { Request.new.run(code) }
-      [value.inspect, @queue]
+      # `inspect` is user code too: within the limit.
+      inspected = Timeout.timeout(TIME_LIMIT) { Request.new.run(code).inspect }
+      [inspected, @queue]
     rescue ScriptError, StandardError => e
       describe(e)
     ensure

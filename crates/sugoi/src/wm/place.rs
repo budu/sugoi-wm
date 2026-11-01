@@ -125,6 +125,12 @@ impl Wm {
         let mut stack = self.stack.clone();
         stack.retain(|&w| self.visible(w));
         stack.sort_by_key(|&w| self.layer(w));
+        // [E4] Docks go above every window but a fullscreen one.
+        let fullscreen = stack.iter().position(|&w| self.clients[&w].fullscreen);
+        let mut docks: Vec<Window> = self.docks.keys().copied().collect();
+        docks.sort_unstable();
+        let at = fullscreen.unwrap_or(stack.len());
+        stack.splice(at..at, docks);
         let same = stack.iter().zip(&self.stacked).take_while(|(a, b)| a == b).count();
         if same == stack.len() && same == self.stacked.len() {
             return Ok(false);
@@ -227,15 +233,20 @@ impl Wm {
             }
             return self.arrange();
         }
+        self.set_flag(window, state, None);
+        self.arrange()
+    }
+
+    /// [W3] [W4] [W5] [E7] Sets a state, or toggles it with `None`; the caller arranges.
+    pub(super) fn set_flag(&mut self, window: Window, state: State, value: Option<bool>) {
         let client = self.clients.get_mut(&window).expect("managed");
         let flag = match state {
             State::Maximized => &mut client.maximized,
             State::Fullscreen => &mut client.fullscreen,
             State::OnTop => &mut client.on_top,
-            State::Floating => unreachable!(),
+            State::Floating => &mut client.floating,
         };
-        *flag = !*flag;
-        self.arrange()
+        *flag = value.unwrap_or(!*flag);
     }
 
     /// [W7]

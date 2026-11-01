@@ -195,3 +195,80 @@ fn e10_a_pager_closes_a_window() {
     message(&session, a.window, "_NET_CLOSE_WINDOW", [0, 2, 0, 0, 0]);
     a.expect_protocol("WM_DELETE_WINDOW");
 }
+
+/// A dock along the top, `strut` pixels high, mapped.
+fn dock(session: &Session, strut: u32) -> App {
+    let bar = session.app(AppSpec {
+        kind: Some("_NET_WM_WINDOW_TYPE_DOCK"),
+        positioned: false,
+        ..AppSpec::at(0, 0, 1280, 30)
+    });
+    let atom = session.atom("_NET_WM_STRUT");
+    bar.conn
+        .change_property32(
+            PropMode::REPLACE,
+            bar.window,
+            atom,
+            AtomEnum::CARDINAL,
+            &[0, 0, strut, 0],
+        )
+        .unwrap();
+    bar.map();
+    eventually("bar shown", || session.viewable(bar.window));
+    bar
+}
+
+/// [E4] A fullscreen window covers the bar; others stay below it.
+#[test]
+fn e4_fullscreen_goes_above_docks() {
+    let session = session();
+    let a = app(&session);
+    let bar = dock(&session, 30);
+    eventually("bar above a", || session.above(bar.window, a.window));
+    assert!(session.send(Command::Toggle(State::Fullscreen)));
+    eventually("a above the bar", || session.above(a.window, bar.window));
+}
+
+/// [E4] A strut past the screen breaks nothing.
+#[test]
+fn e4_a_huge_strut_leaves_a_pixel() {
+    let mut session = session();
+    let a = app(&session);
+    let _bar = dock(&session, u32::MAX);
+    // The work area keeps the last row; the window, at least 1 px, is there.
+    eventually("a squeezed", || session.outer(a.window).1 == 799);
+    assert!(session.wm_running());
+}
+
+/// [E5] A state the app sets before mapping counts.
+#[test]
+fn e5_an_app_can_start_fullscreen() {
+    let session = session();
+    let video = session.app(AppSpec::at(0, 0, 200, 100));
+    let (state, fullscreen) =
+        (session.atom("_NET_WM_STATE"), session.atom("_NET_WM_STATE_FULLSCREEN"));
+    video
+        .conn
+        .change_property32(PropMode::REPLACE, video.window, state, AtomEnum::ATOM, &[fullscreen])
+        .unwrap();
+    video.map();
+    // Unmanaged, the window has no border either: wait until sugoi has it.
+    eventually("managed", || session.wm_state(video.window).is_some());
+    settle();
+    let g = session.geometry(video.window).unwrap();
+    assert_eq!((g.width, g.height, g.border_width), (1280, 800, 0));
+    assert_eq!(states(&session, video.window), [fullscreen]);
+}
+
+/// [E8] An app's own activation does not pull the user to another workspace.
+#[test]
+fn e8_an_app_cannot_switch_the_workspace() {
+    let session = session();
+    let a = app(&session);
+    assert!(session.send(Command::Workspace(Goto::Number(4))));
+    eventually("a hidden", || !session.viewable(a.window));
+    message(&session, a.window, "_NET_ACTIVE_WINDOW", [1, 0, 0, 0, 0]);
+    settle();
+    assert_eq!(values(&session, session.root, "_NET_CURRENT_DESKTOP"), [3]);
+    assert!(!session.viewable(a.window));
+}

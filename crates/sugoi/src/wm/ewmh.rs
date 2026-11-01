@@ -132,8 +132,8 @@ impl Wm {
     /// before it waits, so every path that changes state is covered.
     pub(super) fn publish(&mut self) -> Result<(), Error> {
         let (root, window_kind) = (self.root, AtomEnum::WINDOW);
-        let clients = self.managed.clone();
-        if clients != self.published.clients {
+        if self.managed != self.published.clients {
+            let clients = self.managed.clone();
             let property = self.atoms._NET_CLIENT_LIST;
             self.conn.change_property32(
                 PropMode::REPLACE,
@@ -211,7 +211,7 @@ impl Wm {
         if e.type_ == a._NET_WM_STATE && managed {
             self.state_request(e.window, data[0], [data[1], data[2]])
         } else if e.type_ == a._NET_ACTIVE_WINDOW && managed {
-            self.activate(e.window)
+            self.activation_request(e.window, data[0])
         } else if e.type_ == a._NET_CURRENT_DESKTOP {
             self.switch(Goto::Index(data[0] as usize))
         } else if e.type_ == a._NET_WM_DESKTOP && managed {
@@ -245,22 +245,30 @@ impl Wm {
                 states.push(state);
             }
         }
-        let client = self.clients.get_mut(&window).expect("managed");
+        let value = match action {
+            REMOVE => Some(false),
+            ADD => Some(true),
+            TOGGLE => None,
+            _ => return Ok(()),
+        };
         for state in states {
-            let flag = match state {
-                State::Fullscreen => &mut client.fullscreen,
-                State::OnTop => &mut client.on_top,
-                State::Maximized => &mut client.maximized,
-                State::Floating => continue,
-            };
-            *flag = match action {
-                REMOVE => false,
-                ADD => true,
-                TOGGLE => !*flag,
-                _ => *flag,
-            };
+            self.set_flag(window, state, value);
         }
         self.arrange()
+    }
+
+    /// [E8] A pager or the user (source 2) gets the window wherever it is; an app (1, or
+    /// 0 from old clients) only focuses a window already shown, so it cannot pull the
+    /// user to another workspace.
+    fn activation_request(&mut self, window: Window, source: u32) -> Result<(), Error> {
+        const PAGER: u32 = 2;
+        if source == PAGER {
+            self.activate(window)
+        } else if self.visible(window) {
+            self.focus(window, true)
+        } else {
+            Ok(())
+        }
     }
 
     /// [E8] Shows `window` wherever it is, and focuses it.
@@ -323,8 +331,10 @@ impl Wm {
             top = top.max(strut[2]);
             bottom = bottom.max(strut[3]);
         }
-        let width = full.width.saturating_sub(left + right).max(1);
-        let height = full.height.saturating_sub(top + bottom).max(1);
+        // A strut past the screen, from a bad dock, leaves at least a pixel.
+        let (left, top) = (left.min(full.width - 1), top.min(full.height - 1));
+        let width = (full.width - left).saturating_sub(right).max(1);
+        let height = (full.height - top).saturating_sub(bottom).max(1);
         let area = Rect::new(full.x + left as i32, full.y + top as i32, width, height);
         if area != self.screen {
             self.screen = area;

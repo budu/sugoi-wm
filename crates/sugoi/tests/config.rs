@@ -844,3 +844,31 @@ fn i1_spawned_apps_get_the_socket() {
     let expected = format!("SUGOI_SOCKET={}", path.display());
     eventually("env", || session.binary().log("env.log") == [expected.clone()]);
 }
+
+/// [I2] An `inspect` that never ends is stopped like the request.
+#[test]
+fn i2_a_looping_inspect_is_stopped() {
+    let session = Session::with_config("");
+    let path = socket(&session);
+    let code = "o = Object.new\ndef o.inspect = loop {}\no";
+    let reply = sugoictl::request(&path, code).unwrap();
+    let sugoictl::Reply::Error(message) = reply else { panic!("{reply:?}") };
+    assert!(message.contains("execution expired"), "{message}");
+    assert_eq!(sugoictl::request(&path, "1 + 1").unwrap(), sugoictl::Reply::Ok("2".into()));
+}
+
+/// [I4] A client that does not read its reply holds nobody up.
+#[test]
+fn i4_an_unread_reply_holds_nobody_up() {
+    use std::io::Write;
+    let session = Session::with_config("");
+    let path = socket(&session);
+    let mut lazy = std::os::unix::net::UnixStream::connect(&path).unwrap();
+    lazy.write_all(b"\"x\" * 4_000_000").unwrap();
+    lazy.shutdown(std::net::Shutdown::Write).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    assert_eq!(sugoictl::request(&path, "1 + 1").unwrap(), sugoictl::Reply::Ok("2".into()));
+    assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
+    drop(lazy);
+}
