@@ -525,3 +525,21 @@ fn c2_quit_restores_the_original_border_width() {
     assert!(session.join().is_ok());
     assert_eq!(session.geometry(app.window).unwrap().border_width, 0);
 }
+
+/// [F5] and [F2]
+#[test]
+fn f5_the_pointer_wins_over_the_history() {
+    let session = Session::new();
+    let below = session.app(AppSpec::at(0, 0, 300, 200));
+    let other = session.app(AppSpec::at(600, 0, 300, 200));
+    let top = session.app(AppSpec::at(0, 0, 300, 200));
+    for app in [&below, &other, &top] {
+        app.map();
+        eventually("focused", || session.focus() == app.window);
+    }
+    session.move_pointer(50, 50);
+    // The history says `other`, but closing `top` leaves the pointer over `below`.
+    top.conn.destroy_window(top.window).unwrap();
+    top.conn.sync().unwrap();
+    eventually("below focused", || session.focus() == below.window);
+}

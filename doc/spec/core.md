@@ -54,7 +54,9 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   messages use `CurrentTime` (decision notes, Core).
 - **[F5] Focus history.** sugoi keeps the managed windows in focus order. When the
   focused window is unmanaged, the most recently focused remaining window gets the
-  focus; with none left, the focus goes to the root (`PointerRoot`).
+  focus; with none left, the focus goes to the root (`PointerRoot`). If the unmap leaves
+  the pointer over another managed window, the crossing focuses that window ([F2]): the
+  pointer wins over the history, as in awesome.
 - **[F7] Malformed hints.** A `WM_HINTS` property sugoi cannot parse counts as absent.
 - **[F6] Borders.** The focused window's border has the focused color, every other
   managed window's the normal color. Defaults, from the awesome config: width 3 px,

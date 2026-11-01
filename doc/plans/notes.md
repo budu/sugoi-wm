@@ -5,6 +5,10 @@ each section.
 
 ## Core
 
+- **The pointer wins over the focus history** (user, 2026-10-31). When closing a window
+  leaves the pointer over another one, the crossing focuses it, as in awesome; ignoring
+  those crossings would leave focus and pointer apart after most closes once layouts
+  tile the screen.
 - **`CurrentTime` for focus and protocol messages** (M1). With event timestamps, a
   focus set earlier at `CurrentTime` moved the server's last-focus-change time past later
   stamps, and X ignored the requests: f1 and f5 failed 10 times in 30 runs. The review
