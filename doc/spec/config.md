@@ -13,8 +13,9 @@ hooks (M5), spawn limits (M6).
   helper methods, constants, reading other files.
 - **[L3] Defaults.** Without a config file, or when the first load fails, sugoi runs on
   built-in defaults: the [F6] border, and the bindings `Mod4-Return` (spawn `xterm`),
-  `Mod4-j` and `Mod4-k` (focus), `Mod4-Shift-q` (close), `Mod4-Shift-e` (quit) and
-  `Mod4-Ctrl-r` (reload).
+  `Mod4-j` and `Mod4-k` (focus), `Mod4-Shift-q` (close), `Mod4-Shift-e` (quit),
+  `Mod4-Ctrl-r` (reload), and `Mod4-1` to `Mod4-0` and `Mod4-Shift-1` to
+  `Mod4-Shift-0` by keycode (`workspace` and `move_to` 1 to 10, [V4], [V8]).
 - **[L4] Errors.** A load that raises, including a syntax error or an unknown key name,
   changes nothing: the previous config, or the defaults, stay live. The error is logged
   with its file and line and shown with `notify-send` (dunst).
@@ -51,6 +52,8 @@ hooks (M5), spawn limits (M6).
   - `spawn "kitty"` and `spawn "bash", "-ic", "~/bin/superkitty", name: "superkitty"`
     start a program ([P1]); `name` defaults to the basename of the first argument.
   - `sh "overmind restart -s ~/x.sock"` is `spawn "sh", "-c", ...` named `sh`.
+  - `workspace 3`, `workspace :next`, `:previous` and `:back` switch workspaces
+    ([V4] to [V6]); `move_to 3` moves the focused window ([V8]).
   - `reload` reloads the config ([L5]); `restart` replaces the sugoi process with a new
     one started the same way, which adopts the windows ([S2]); `quit` exits ([C2]).
 - **[D6] Root buttons.** `root_button "3" do ... end` binds a button chord on the root
