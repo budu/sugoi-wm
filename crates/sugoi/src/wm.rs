@@ -1,6 +1,8 @@
 //! The window manager: X connection, managed windows, focus and the event loop.
 
-use std::collections::HashMap;
+mod place;
+
+use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -13,7 +15,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use x11rb::connection::Connection;
 use x11rb::errors::{ConnectionError, ReplyError};
-use x11rb::properties::WmHints;
+use x11rb::properties::{WmHints, WmSizeHints};
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::{ErrorKind, Event};
 use x11rb::rust_connection::RustConnection;
@@ -22,8 +24,10 @@ use x11rb::{CURRENT_TIME, NONE};
 
 use crate::chord::{self, Key};
 use crate::keyboard::Keyboard;
+use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
 use crate::{Action, Border, Command, Direction, Error, Handle, Script, Settings};
+use place::{Drag, outer};
 
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
@@ -46,6 +50,19 @@ struct Client {
     hints: Hints,
     /// The border width before sugoi managed the window, restored on withdrawal.
     border_width: u16,
+    /// The outer rectangle the window has when it floats.
+    rect: Rect,
+    /// The outer rectangle and border sugoi last configured.
+    placed: Option<(Rect, u16)>,
+    floating: bool,
+    maximized: bool,
+    fullscreen: bool,
+    on_top: bool,
+    minimized: bool,
+    /// [Y3] The window's share of the stack column.
+    share: f32,
+    /// [W6] Unmaps sugoi made whose `UnmapNotify` has not come yet.
+    unmaps: u32,
 }
 
 /// [F4] The ICCCM properties that decide how a window takes focus and closes.
@@ -86,6 +103,22 @@ pub struct Wm {
     root_buttons: HashMap<(u16, u8), Action>,
     /// Whether a config has loaded, so a failed reload keeps it ([L4]).
     loaded: bool,
+    /// [Y7]
+    layouts: Vec<Layout>,
+    layout: Layout,
+    master: Master,
+    /// The work area ([Y1]), and the screen for now.
+    screen: Rect,
+    /// [W8] Managed windows in the order they were raised, and as last stacked.
+    stack: Vec<Window>,
+    stacked: Vec<Window>,
+    /// [W6] Minimized windows, the latest last.
+    minimized: Vec<Window>,
+    drag: Option<Drag>,
+    /// Where the last button press was, for a drag it starts.
+    press: Option<(i16, i16)>,
+    /// Events read while dropping crossings ([Z1]), still to handle.
+    pending: VecDeque<Event>,
     clients: HashMap<Window, Client>,
     /// [D5] Managed windows in the order `focus` and `swap` follow.
     order: Vec<Window>,
@@ -123,6 +156,10 @@ impl Wm {
     pub fn connect(display: Option<&str>, script: Box<dyn Script>) -> Result<Wm, Error> {
         let (conn, screen) = x11rb::connect(display)?;
         let root = conn.setup().roots[screen].root;
+        let (width, height) = {
+            let s = &conn.setup().roots[screen];
+            (u32::from(s.width_in_pixels), u32::from(s.height_in_pixels))
+        };
         let atoms = Atoms::new(&conn)?.reply().map_err(lost)?;
 
         // [S1]
@@ -159,6 +196,16 @@ impl Wm {
             buttons: HashMap::new(),
             root_buttons: HashMap::new(),
             loaded: false,
+            layouts: vec![Layout::Tile],
+            layout: Layout::Tile,
+            master: Master::default(),
+            screen: Rect::new(0, 0, width, height),
+            stack: Vec::new(),
+            stacked: Vec::new(),
+            minimized: Vec::new(),
+            drag: None,
+            press: None,
+            pending: VecDeque::new(),
             clients: HashMap::new(),
             order: Vec::new(),
             history: Vec::new(),
@@ -205,6 +252,10 @@ impl Wm {
                 }
             }
             self.conn.flush()?;
+            if let Some(event) = self.pending.pop_front() {
+                self.handle_event(event)?;
+                continue;
+            }
             if let Some(event) = self.conn.poll_for_event()? {
                 self.handle_event(event)?;
                 continue;
@@ -247,6 +298,7 @@ impl Wm {
                     let b = self.order.iter().position(|&w| w == other);
                     if let (Some(a), Some(b)) = (a, b) {
                         self.order.swap(a, b);
+                        self.arrange()?;
                     }
                 }
             }
@@ -259,6 +311,15 @@ impl Wm {
             Command::Reload => self.load()?,
             Command::Restart => self.exit = Some(Exit::Restart),
             Command::Quit => self.exit = Some(Exit::Quit),
+            Command::Layout(choice) => self.choose_layout(choice)?,
+            Command::MasterWidth(delta) => self.master_width(delta)?,
+            Command::WindowHeight(delta) => self.window_height(delta)?,
+            Command::Toggle(state) => self.toggle(state)?,
+            Command::Minimize => self.minimize()?,
+            Command::Restore => self.restore()?,
+            Command::Center(size) => self.center(size)?,
+            Command::Move => self.start_drag(false)?,
+            Command::Resize => self.start_drag(true)?,
         }
         Ok(())
     }
@@ -279,7 +340,7 @@ impl Wm {
                 Direction::Previous => (start + len - step) % len,
             })
             .map(|index| self.order[index])
-            .find(|w| !focusable || self.clients[w].hints.focusable())
+            .find(|&w| if focusable { self.can_focus(w) } else { !self.clients[&w].minimized })
     }
 
     fn run_action(&mut self, action: Action) -> Result<(), Error> {
@@ -324,7 +385,19 @@ impl Wm {
         self.buttons = bindings.buttons;
         self.root_buttons = bindings.root_buttons;
         self.border = bindings.border;
-        self.regrab(true)
+        // [Y7] The first load starts on the first layout; a reload keeps the current one
+        // if the cycle still has it.
+        if !self.loaded || !bindings.layouts.contains(&self.layout) {
+            self.layout = bindings.layouts[0];
+        }
+        self.layouts = bindings.layouts;
+        self.master = bindings.master;
+        self.regrab(true)?;
+        // [L5] Place every window again, with the new border.
+        for client in self.clients.values_mut() {
+            client.placed = None;
+        }
+        self.arrange()
     }
 
     /// [R4] The lock modifiers a chord matches with: none, Caps Lock, Num Lock, both.
@@ -350,7 +423,7 @@ impl Wm {
     }
 
     /// Grabs the key chords and every window's button chords again; after a load, also
-    /// checks the key grabs ([L7]) and redraws every border ([L5]). A keymap change
+    /// checks the key grabs ([L7]) and recolors every border ([L5]). A keymap change
     /// ([R3]) only grabs again.
     fn regrab(&mut self, loaded: bool) -> Result<(), Error> {
         self.grab_keys(loaded)?;
@@ -358,8 +431,6 @@ impl Wm {
             self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
             self.grab_buttons(window)?;
             if loaded {
-                let width = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
-                self.conn.configure_window(window, &width)?;
                 let focused = self.focused == Some(window);
                 let color = if focused { self.border.focused } else { self.border.normal };
                 let color = ChangeWindowAttributesAux::new().border_pixel(color);
@@ -469,6 +540,7 @@ impl Wm {
         for (window, attributes) in viewable.into_iter().rev() {
             self.manage_window(window, &attributes, false)?;
         }
+        self.arrange()?;
         let pointer = self.conn.query_pointer(self.root)?.reply().map_err(lost)?;
         if self.clients.contains_key(&pointer.child) {
             self.focus(pointer.child, false)?;
@@ -477,12 +549,24 @@ impl Wm {
     }
 
     fn handle_event(&mut self, event: Event) -> Result<(), Error> {
+        let sent = event.sent_event();
         match event {
             Event::MapRequest(e) => self.manage(e.window)?,
             Event::ConfigureRequest(e) => self.configure_request(&e)?,
+            // [M4] [W6] A synthetic unmap is a client withdrawing its window (ICCCM 4.1.4);
+            // a real one counts once, from the root, unless sugoi made it.
             Event::UnmapNotify(e) if self.clients.contains_key(&e.window) => {
-                self.unmanage(e.window, false)?
+                let client = self.clients.get_mut(&e.window).expect("managed");
+                if sent {
+                    self.unmanage(e.window, false)?;
+                } else if e.event == self.root && client.unmaps > 0 {
+                    client.unmaps -= 1;
+                } else if e.event == self.root {
+                    self.unmanage(e.window, false)?;
+                }
             }
+            Event::MotionNotify(e) => self.drag_to(e.root_x, e.root_y)?,
+            Event::ButtonRelease(_) => self.end_drag()?,
             Event::DestroyNotify(e) if self.clients.contains_key(&e.window) => {
                 self.unmanage(e.window, true)?
             }
@@ -502,6 +586,7 @@ impl Wm {
                 }
             }
             Event::ButtonPress(e) => {
+                self.press = Some((e.root_x, e.root_y));
                 let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
                 let managed = self.clients.contains_key(&e.event);
                 match action {
@@ -582,15 +667,16 @@ impl Wm {
             ChangeWindowAttributesAux::new().event_mask(mask).border_pixel(self.border.normal);
         self.conn.change_window_attributes(window, &attributes)?;
         let geometry = self.conn.get_geometry(window)?;
+        let size_hints = WmSizeHints::get_normal_hints(&self.conn, window)?;
         let Some(hints) = self.read_hints(window)? else {
             return Ok(());
         };
         let Some(geometry) = vanished(geometry.reply())? else {
             return Ok(());
         };
+        // A malformed or missing WM_NORMAL_HINTS gives no position.
+        let positioned = size_hints.reply().ok().flatten().is_some_and(|h| h.position.is_some());
         debug!("manage {window:#x}");
-        let border = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
-        self.conn.configure_window(window, &border)?;
         self.grab_buttons(window)?;
         let state = self.atoms.WM_STATE;
         self.conn.change_property32(
@@ -600,10 +686,30 @@ impl Wm {
             state,
             &[NORMAL_STATE, NONE],
         )?;
-        self.clients.insert(window, Client { hints, border_width: geometry.border_width });
+        let mut rect = outer(&geometry);
+        // The window's border becomes sugoi's; its inner size stays.
+        let border = 2 * u32::from(self.border.width);
+        rect.width = u32::from(geometry.width) + border;
+        rect.height = u32::from(geometry.height) + border;
+        let client = Client {
+            hints,
+            border_width: geometry.border_width,
+            rect: if map { self.initial_rect(rect, positioned) } else { rect },
+            placed: None,
+            floating: false,
+            maximized: false,
+            fullscreen: false,
+            on_top: false,
+            minimized: false,
+            share: 1.0,
+            unmaps: 0,
+        };
+        self.clients.insert(window, client);
         self.order.push(window);
         self.history.push(window);
+        self.stack.push(window);
         if map {
+            self.arrange()?;
             self.conn.map_window(window)?;
             // [F1]
             self.focus(window, true)?;
@@ -617,8 +723,12 @@ impl Wm {
         let Some(client) = self.clients.remove(&window) else {
             return Ok(());
         };
-        self.history.retain(|&w| w != window);
-        self.order.retain(|&w| w != window);
+        for list in [&mut self.history, &mut self.order, &mut self.stack, &mut self.minimized] {
+            list.retain(|&w| w != window);
+        }
+        if self.drag.as_ref().is_some_and(|d| d.window() == window) {
+            self.end_drag()?;
+        }
         if !destroyed {
             // Withdrawn windows may be reused (a tray icon): leave nothing of sugoi's.
             self.conn.delete_property(window, self.atoms.WM_STATE)?;
@@ -628,35 +738,31 @@ impl Wm {
             let border = ConfigureWindowAux::new().border_width(u32::from(client.border_width));
             self.conn.configure_window(window, &border)?;
         }
-        if self.focused == Some(window) {
-            self.focused = None;
-            // [F5]
-            let next = self.history.iter().copied().find(|w| self.clients[w].hints.focusable());
-            match next {
-                Some(next) => self.focus(next, false)?,
-                None => {
-                    self.conn.set_input_focus(
-                        InputFocus::POINTER_ROOT,
-                        POINTER_ROOT,
-                        CURRENT_TIME,
-                    )?;
-                }
-            }
-        }
-        Ok(())
+        self.stacked.retain(|&w| w != window);
+        self.arrange()?;
+        self.refocus(window)
     }
 
-    /// [M3]
+    /// [M3] [Y9]
     fn configure_request(&mut self, e: &ConfigureRequestEvent) -> Result<(), Error> {
-        let mut aux = ConfigureWindowAux::from_configure_request(e);
-        let managed = self.clients.contains_key(&e.window);
-        if managed {
-            aux.border_width = None;
-        }
-        self.conn.configure_window(e.window, &aux)?;
+        let aux = ConfigureWindowAux::from_configure_request(e);
+        let Some(client) = self.clients.get(&e.window) else {
+            self.conn.configure_window(e.window, &aux)?;
+            return Ok(());
+        };
         let resized =
             aux.x.is_some() || aux.y.is_some() || aux.width.is_some() || aux.height.is_some();
-        if managed && !resized {
+        let floating = !self.tiled(e.window) && !client.maximized && !client.fullscreen;
+        if floating && resized {
+            let border = 2 * u32::from(self.border.width);
+            let mut rect = client.rect;
+            rect.x = aux.x.unwrap_or(rect.x);
+            rect.y = aux.y.unwrap_or(rect.y);
+            rect.width = aux.width.map_or(rect.width, |w| w + border);
+            rect.height = aux.height.map_or(rect.height, |h| h + border);
+            self.clients.get_mut(&e.window).expect("managed").rect = rect;
+            self.arrange()?;
+        } else {
             let Some(geometry) = vanished(self.conn.get_geometry(e.window)?.reply())? else {
                 return Ok(());
             };
@@ -689,8 +795,7 @@ impl Wm {
         };
         let hints = client.hints;
         if raise {
-            let above = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
-            self.conn.configure_window(window, &above)?;
+            self.raise(window)?;
         }
         if !hints.focusable() {
             return Ok(());
@@ -719,6 +824,11 @@ impl Wm {
         for (&window, client) in &self.clients {
             let border = ConfigureWindowAux::new().border_width(u32::from(client.border_width));
             self.conn.configure_window(window, &border)?;
+            // [W6] A WM started next adopts only mapped windows.
+            if client.minimized {
+                self.conn.map_window(window)?;
+                self.set_state(window, NORMAL_STATE)?;
+            }
         }
         Ok(())
     }
@@ -794,6 +904,8 @@ pub(crate) fn lost(e: ReplyError) -> Error {
 /// Settings whose chords parsed: what `install` makes current.
 struct Bindings {
     border: Border,
+    layouts: Vec<Layout>,
+    master: Master,
     keys: Vec<(String, ModMask, Key, Action)>,
     buttons: HashMap<(u16, u8), Action>,
     root_buttons: HashMap<(u16, u8), Action>,
@@ -816,8 +928,13 @@ impl Bindings {
             }
             Ok(map)
         };
+        if settings.layouts.is_empty() {
+            return Err("layouts needs at least one layout".into());
+        }
         Ok(Bindings {
             border: settings.border,
+            layouts: settings.layouts.clone(),
+            master: settings.master,
             keys,
             buttons: buttons(&settings.buttons)?,
             root_buttons: buttons(&settings.root_buttons)?,

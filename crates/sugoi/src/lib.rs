@@ -2,6 +2,7 @@
 
 mod chord;
 mod keyboard;
+pub mod layout;
 pub mod ruby;
 pub mod spawn;
 mod wm;
@@ -12,6 +13,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
+pub use layout::{Layout, Master, Rect, Side};
 pub use wm::Wm;
 
 /// [F6] and [D1]
@@ -30,7 +32,7 @@ impl Default for Border {
 }
 
 /// What a binding does.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     /// Built-in commands, for the defaults ([L3]).
     Commands(Vec<Command>),
@@ -39,7 +41,7 @@ pub enum Action {
 }
 
 /// A chord as written in the config, and its action.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Binding {
     pub chord: String,
     pub action: Action,
@@ -52,7 +54,7 @@ impl Binding {
 }
 
 /// A loaded configuration, before sugoi checks its chords.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub border: Border,
     /// [D2] What `Mod` stands for.
@@ -62,6 +64,9 @@ pub struct Settings {
     pub buttons: Vec<Binding>,
     /// [D6] Chords on the root window.
     pub root_buttons: Vec<Binding>,
+    /// [Y7] The layout cycle; the first is the starting layout. Never empty.
+    pub layouts: Vec<Layout>,
+    pub master: Master,
 }
 
 impl Default for Settings {
@@ -81,6 +86,8 @@ impl Default for Settings {
             ],
             buttons: Vec::new(),
             root_buttons: Vec::new(),
+            layouts: vec![Layout::Tile, Layout::Max, Layout::Float],
+            master: Master::default(),
         }
     }
 }
@@ -91,8 +98,25 @@ pub enum Direction {
     Previous,
 }
 
+/// [Y7] A layout to switch to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Next,
+    Previous,
+    Pick(Layout),
+}
+
+/// A state `toggle` turns on or off ([W1] to [W5]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Floating,
+    Maximized,
+    Fullscreen,
+    OnTop,
+}
+
 /// An action sent to a running WM, by a binding or through its [`Handle`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// [D5]
     Focus(Direction),
@@ -108,6 +132,24 @@ pub enum Command {
     Restart,
     /// [C2]
     Quit,
+    /// [Y7]
+    Layout(Choice),
+    /// [Y4] A change of the master width.
+    MasterWidth(f32),
+    /// [Y3] A change of the focused window's share.
+    WindowHeight(f32),
+    /// [W1] to [W5]
+    Toggle(State),
+    /// [W6]
+    Minimize,
+    /// [W6]
+    Restore,
+    /// [W7] With a size, as a fraction of the screen.
+    Center(Option<f32>),
+    /// [G1]
+    Move,
+    /// [G2]
+    Resize,
 }
 
 /// The configuration's code: loads settings and runs the blocks bindings point to.

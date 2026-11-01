@@ -42,6 +42,24 @@ module Sugoi
     end
 
     def sh(command) = spawn("sh", "-c", String(command), name: "sh")
+
+    # [Y7]
+    def layout(name) = Sugoi.queue("layout", Sugoi.one_of(name, %w[next previous tile max float]))
+    # [Y4] [Y3]
+    def master_width(delta) = Sugoi.queue("master_width", Float(delta).to_s)
+    def window_height(delta) = Sugoi.queue("window_height", Float(delta).to_s)
+    # [W1] to [W5]
+    def toggle(state)
+      Sugoi.queue("toggle", Sugoi.one_of(state, %w[floating maximized fullscreen on_top]))
+    end
+    # [W6]
+    def minimize = Sugoi.queue("minimize")
+    def restore = Sugoi.queue("restore")
+    # [W7]
+    def center(size: nil) = Sugoi.queue("center", *(size.nil? ? [] : [Float(size).to_s]))
+    # [G1] [G2]
+    def move = Sugoi.queue("move")
+    def resize = Sugoi.queue("resize")
   end
 
   # The object a config file runs in.
@@ -56,6 +74,8 @@ module Sugoi
       @keys = {}
       @buttons = {}
       @root_buttons = {}
+      @layouts = %w[tile max float]
+      @master = {}
       @blocks = []
     end
 
@@ -78,10 +98,25 @@ module Sugoi
     # [D6]
     def root_button(chord, &block) = @root_buttons[String(chord)] = register(chord, block)
 
-    # What sugoi reads: [width, focused, normal, modkey, keys, buttons, root buttons].
+    # [Y7]
+    def layouts(*names)
+      raise ArgumentError, "layouts needs at least one layout" if names.empty?
+
+      @layouts = names.map { |name| Sugoi.one_of(name, %w[tile max float]) }
+    end
+
+    # [Y2] [Y4]
+    def master(side: nil, width: nil)
+      @master[:side] = Sugoi.one_of(side, %w[left right]) unless side.nil?
+      @master[:width] = Float(width) unless width.nil?
+    end
+
+    # What sugoi reads: [width, focused, normal, modkey, keys, buttons, root buttons,
+    # layouts, master side, master width].
     def export
       [@border[:width], @border[:focused], @border[:normal], @modkey,
-       @keys.to_a, @buttons.to_a, @root_buttons.to_a]
+       @keys.to_a, @buttons.to_a, @root_buttons.to_a,
+       @layouts, @master[:side], @master[:width]]
     end
 
     private
@@ -130,11 +165,12 @@ module Sugoi
       nil
     end
 
-    def direction(name)
-      name = name.to_s
-      return name if %w[next previous].include?(name)
+    def direction(name) = one_of(name, %w[next previous])
 
-      raise ArgumentError, "direction must be :next or :previous, not #{name.inspect}"
+    def one_of(name, names)
+      return name.to_s if names.include?(name.to_s)
+
+      raise ArgumentError, "expected one of :#{names.join(", :")}, not #{name.inspect}"
     end
 
     def color(value)
