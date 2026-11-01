@@ -30,6 +30,16 @@ each section.
 
 ## Configuration
 
+- **`root_button` apart from `button`** (M2, review). One `button` for both made a root
+  menu chord take that button from every window, as awesome's `root.buttons` and
+  `clientbuttons` are apart.
+- **Signals before settings** (M2, review). `Wm::connect`, then `quit_on_signals`, then
+  `Wm::start`: a SIGTERM during a slow load still quits cleanly. The prelude resets
+  Ruby's handlers and refuses `trap` on TERM, INT and HUP.
+- **5 s to load, 1 s per block** (M2, review). A config may `require` gems, so its load
+  gets longer than a key press.
+- **A pacman hook, not a static libruby** (M2). Arch has no `libruby-static.a`;
+  `contrib/sugoi-ruby.hook` warns when a Ruby upgrade leaves sugoi without its libruby.
 - **The pacman Ruby, dynamically linked** (M2). `.cargo/config.toml` sets `RUBY` to
   `/usr/bin/ruby` (3.4.10), since asdf's 4.0.1 comes first on `PATH` in a shell but
   lives in the home directory and may not be on `PATH` when X starts. Arch ships no
@@ -81,9 +91,10 @@ each section.
 
 ## Spawning
 
-- **Apps are reaped in a thread** (M2). `systemd-run --scope` runs the app as sugoi's
-  child; a thread per app waits for it. `SIGCHLD` ignored would break Ruby's
-  `Process.wait` in configs, and Ruby threads cannot reap while sugoi waits in `poll`.
+- **Apps start through `setsid -f`** (M2, review). `systemd-run --scope` runs the app
+  as the caller's child; through `setsid -f` it is never sugoi's, so nothing is left to
+  reap after a restart (the first version reaped in a thread per app, and a restart
+  left zombies). Ignoring `SIGCHLD` instead would break `Process.wait` in configs.
 - **Scope names keep letters, digits and `_`** (M2). A `-` would nest the slice
   (`app-zed-editor.slice` under `app-zed.slice`).
 - **No workspace freezing** (user, 2026-10-31). Freezing hidden apps' cgroups stops

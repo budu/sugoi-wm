@@ -1,0 +1,11 @@
+# Warns when a Ruby upgrade may break sugoi, which links libruby.so.<major.minor>.
+# Install: sudo cp contrib/sugoi-ruby.hook /etc/pacman.d/hooks/
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = ruby
+
+[Action]
+Description = Checking that sugoi still finds libruby...
+When = PostTransaction
+Exec = /usr/bin/sh -c 'for bin in /usr/local/bin/sugoi /home/*/.cargo/bin/sugoi; do [ -x "$bin" ] && ldd "$bin" | grep -q "libruby.*not found" && echo "sugoi: $bin lost libruby after the Ruby upgrade; rebuild it before the next X session"; done; true'
