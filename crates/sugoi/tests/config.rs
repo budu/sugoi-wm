@@ -686,9 +686,7 @@ fn h1_the_workspace_hook_sees_the_new_workspaces_focus() {
 fn h4_a_reload_in_a_hook_runs_no_stale_block() {
     let mut session =
         Session::with_config("on(:focus) { reload }\non(:focus) { spawn \"second\" }\n");
-    eventually("marker done", || {
-        session.focus() == POINTER_ROOT || !spawns(&mut session).is_empty()
-    });
+    // The harness's marker ran the hooks; let their spawns land.
     settle();
     let before = spawns(&mut session).len();
     rewrite(&mut session, "key(\"Mod-y\") { spawn \"y\" }\nkey(\"Mod-x\") { spawn \"stale\" }\n");
@@ -722,8 +720,26 @@ fn u6_an_adopted_window_keeps_its_geometry() {
     feh.conn.configure_window(feh.window, &request).unwrap();
     feh.conn.flush().unwrap();
     eventually("moved", || session.outer(feh.window) == (10, 20, 306, 206));
+    // A new sugoi writes _NET_CURRENT_DESKTOP when the root has none: the restart's sign.
+    let current = session.atom("_NET_CURRENT_DESKTOP");
+    session.conn.delete_property(session.root, current).unwrap();
+    session.conn.flush().unwrap();
     session.keys(&[SUPER, X]);
-    // The restart gives the window its own border back for a moment, then sugoi's.
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    let written = || {
+        let any: Atom = AtomEnum::ANY.into();
+        let reply = session.conn.get_property(false, session.root, current, any, 0, 1);
+        reply.unwrap().reply().unwrap().value_len > 0
+    };
+    eventually("restarted", written);
     eventually("kept", || session.outer(feh.window) == (10, 20, 306, 206));
+}
+
+/// [H1] A reload keeps the hooks other events queued.
+#[test]
+fn h1_a_reload_keeps_queued_hooks() {
+    let mut session = Session::with_config(
+        "key(\"Mod-x\") { workspace 2; reload }\non(:workspace) { |n| spawn \"ws\", n.to_s }\n",
+    );
+    session.keys(&[SUPER, X]);
+    eventually("workspace hook", || spawns(&mut session) == [spawned("ws", "ws 2")]);
 }

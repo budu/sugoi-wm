@@ -1,5 +1,6 @@
 //! Rules and hooks (`doc/spec/rules.md`).
 
+use x11rb::errors::ReplyError;
 use x11rb::properties::WmClass;
 use x11rb::protocol::xproto::*;
 
@@ -42,9 +43,6 @@ impl Wm {
 
     /// [U1] What a window is; missing or malformed properties read as empty.
     pub(super) fn read_info(&self, cookies: InfoCookies<'_>) -> Result<Info, Error> {
-        let text = |reply: Option<GetPropertyReply>| {
-            reply.map(|r| String::from_utf8_lossy(&r.value).into_owned()).unwrap_or_default()
-        };
         let (class, instance) = match cookies.class.reply() {
             Ok(Some(c)) => (
                 String::from_utf8_lossy(c.class()).into_owned(),
@@ -52,8 +50,7 @@ impl Wm {
             ),
             _ => (String::new(), String::new()),
         };
-        let net_name = text(vanished(cookies.net_name.reply())?);
-        let name = vanished(cookies.name.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
+        let title = self.title(cookies.net_name.reply(), cookies.name.reply())?;
         let types: Vec<Atom> = vanished(cookies.kind.reply())?
             .and_then(|r| r.value32().map(|v| v.collect()))
             .unwrap_or_default();
@@ -61,20 +58,34 @@ impl Wm {
         Ok(Info {
             class,
             instance,
-            title: if net_name.is_empty() { name } else { net_name },
+            title,
             kind: types.iter().find_map(|&t| self.window_type(t)),
             transient,
         })
     }
 
-    /// A text property: Latin-1 when its type is `STRING`, else UTF-8.
+    /// A text property: Latin-1 for `STRING`, UTF-8 for `UTF8_STRING`; other encodings,
+    /// such as `COMPOUND_TEXT`, read as empty rather than garbled.
     fn decode(&self, reply: &GetPropertyReply) -> String {
         let string: Atom = AtomEnum::STRING.into();
         if reply.type_ == string {
             reply.value.iter().map(|&b| char::from(b)).collect()
-        } else {
+        } else if reply.type_ == self.atoms.UTF8_STRING {
             String::from_utf8_lossy(&reply.value).into_owned()
+        } else {
+            String::new()
         }
+    }
+
+    /// [U1] `_NET_WM_NAME`, else `WM_NAME`.
+    fn title(
+        &self,
+        net: Result<GetPropertyReply, ReplyError>,
+        name: Result<GetPropertyReply, ReplyError>,
+    ) -> Result<String, Error> {
+        let net = vanished(net)?.map(|r| self.decode(&r)).unwrap_or_default();
+        let name = vanished(name)?.map(|r| self.decode(&r)).unwrap_or_default();
+        Ok(if net.is_empty() { name } else { net })
     }
 
     /// [U1] The title alone, for a title change.
@@ -83,9 +94,7 @@ impl Wm {
         let net = self.conn.get_property(false, window, a._NET_WM_NAME, a.UTF8_STRING, 0, 1024)?;
         let any: Atom = AtomEnum::ANY.into();
         let name = self.conn.get_property(false, window, AtomEnum::WM_NAME, any, 0, 1024)?;
-        let net = vanished(net.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
-        let name = vanished(name.reply())?.map(|r| self.decode(&r)).unwrap_or_default();
-        Ok(if net.is_empty() { name } else { net })
+        self.title(net.reply(), name.reply())
     }
 
     fn window_type(&self, atom: Atom) -> Option<WindowType> {
@@ -116,22 +125,18 @@ impl Wm {
             .iter()
             .filter(|rule| rule.matcher.matches(info))
             .fold(Effects::default(), |acc, rule| acc.then(&rule.effects));
-        let (screen, border) = (self.screen, 2 * u32::from(self.border.width));
-        let client = self.clients.get_mut(&window).expect("ruled windows are managed");
-        if let Some(float) = effects.float {
-            client.floating = float;
-        }
         // [U6] An adopted window keeps the geometry it had: only new ones are placed.
         if !adopted {
             if let Some((width, height)) = effects.size {
-                client.rect.width = width + border;
-                client.rect.height = height + border;
+                self.resize_rect(window, width, height);
             }
             if effects.center {
-                client.rect = layout::center(screen, client.rect);
+                self.center_rect(window);
             }
-            // [W2]
-            client.rect = layout::on_screen(screen, client.rect);
+        }
+        let client = self.clients.get_mut(&window).expect("ruled windows are managed");
+        if let Some(float) = effects.float {
+            client.floating = float;
         }
         if let Some(on_top) = effects.on_top {
             client.on_top = on_top;
@@ -202,6 +207,13 @@ impl Wm {
     }
 
     fn run_hooks_now(&mut self, event: Event, arg: HookArg) -> Result<(), Error> {
+        // [H2] A deferred hook sees its window as it is now, as `windows` does.
+        let arg = match arg {
+            HookArg::Window(s) if self.clients.contains_key(&s.id) => {
+                HookArg::Window(self.snapshot(s.id))
+            }
+            other => other,
+        };
         let blocks: Vec<usize> =
             self.hooks.iter().filter(|(e, _)| *e == event).map(|&(_, b)| b).collect();
         if blocks.is_empty() {

@@ -39,14 +39,15 @@ the identifiers in brackets.
   window shows, for new windows only (not those adopted at startup, so a restart does
   not run them again); `on(:focus)` after a window gets the focus; `on(:unmanage)`
   after a window is gone; `on(:workspace) { |n| ... }` after a switch, with the new
-  number. These three run once sugoi has finished handling what raised them: after a
-  switch, the new workspace's window has the focus. Several blocks for one event run in
-  config order; a `reload` among them ends that event's hooks.
+  number. These three run once sugoi has finished handling the event or the action that
+  raised them, and see the state after it: after a key's single switch, the new
+  workspace's window has the focus. Several blocks for one event run in config order;
+  a `reload` among them ends that event's hooks.
 - **[H2] Windows.** A hook's window is read-only: `id`, `class_name`, `instance`,
   `title`, `type`, `transient?`, `workspace` (1 to 30) and `floating?`, as they were
   when the hook started. Its methods `float`, `tile`, `size(w, h)`, `center`, `master`,
   `move_to(n)` and `close` act on it, like the actions of [D5]; `size` and `center`
-  float a tiled window, as `center` does ([W7]).
+  float a tiled window, as the `center` action of [W7] does.
 - **[H3] Queries.** `windows` returns every managed window in the window order, as
   read-only windows; `windows(workspace: n)` only those on workspace n.
 - **[H4] Running.** A hook is a block: its actions run once it returns, errors and the

@@ -451,7 +451,6 @@ impl Wm {
         self.rules = Rule::defaults().into_iter().chain(bindings.rules).collect();
         self.hooks = bindings.hooks;
         self.loads += 1;
-        self.later_hooks.clear();
         self.regrab(true)?;
         // [L5] Place every window again, with the new border.
         for client in self.clients.values_mut() {
@@ -708,7 +707,10 @@ impl Wm {
                     if let Some(client) = self.clients.get_mut(&e.window) {
                         client.info.title = title;
                     }
-                } else if e.atom == class {
+                } else if e.atom == class
+                    || e.atom == self.atoms._NET_WM_WINDOW_TYPE
+                    || e.atom == AtomEnum::WM_TRANSIENT_FOR.into()
+                {
                     let cookies = self.request_info(e.window)?;
                     let info = self.read_info(cookies)?;
                     let client = self.clients.get_mut(&e.window).expect("managed");
