@@ -13,7 +13,8 @@ the identifiers in brackets.
   they were managed, `_NET_CLIENT_LIST_STACKING` from bottom to top, and
   `_NET_ACTIVE_WINDOW` the focused one (`None` without one); they follow every change.
 - **[E3] Workspaces.** `_NET_NUMBER_OF_DESKTOPS` is 30 and `_NET_DESKTOP_NAMES` names
-  them `1` to `30`; `_NET_CURRENT_DESKTOP` and each window's `_NET_WM_DESKTOP` are [V9].
+  them `1` to `30`; `_NET_CURRENT_DESKTOP` and each window's `_NET_WM_DESKTOP` are [V9]
+  and [V10].
   `_NET_DESKTOP_GEOMETRY` is the screen's size and `_NET_DESKTOP_VIEWPORT` is `0, 0` for
   every workspace, as on any WM without large desktops.
 - **[E4] Work area.** Windows of type `_NET_WM_WINDOW_TYPE_DOCK` (a bar) are mapped but
@@ -43,7 +44,8 @@ the identifiers in brackets.
   on the current workspace: an app cannot pull the user to another workspace.
 - **[E9] Desktops.** `_NET_CURRENT_DESKTOP` with n switches to workspace n + 1, as the
   numbers 11 to 30 do ([V4]), including from a bar's clicks and scrolls;
-  `_NET_WM_DESKTOP` moves a window there.
+  `_NET_WM_DESKTOP` moves a window there, or, sent before the window maps, says where
+  it goes ([V10]).
 - **[E10] Closing.** `_NET_CLOSE_WINDOW` closes the window as [K1] does.
 
 ## IPC

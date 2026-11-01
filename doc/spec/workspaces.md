@@ -43,3 +43,9 @@ identifiers in brackets. Users number workspaces 1 to 30; EWMH numbers them 0 to
   ([C2]); on start, a window with a valid `_NET_WM_DESKTOP` goes back on that
   workspace, and the root's `_NET_CURRENT_DESKTOP` names the current one. The rest of
   EWMH comes in M7.
+- **[V10] Workspaces apps ask for.** A new window whose app set a valid
+  `_NET_WM_DESKTOP` before mapping it, or asked for one with a `_NET_WM_DESKTOP`
+  message before then ([E9]), goes on that workspace, unless a rule's `workspace:` puts
+  it elsewhere ([U6]); otherwise, or for an invalid one (all workspaces is
+  `0xFFFFFFFF`), on the current. Firefox restores its windows' workspaces so. On
+  another workspace it stays hidden, and the focus stays where it was, as [U7] says.

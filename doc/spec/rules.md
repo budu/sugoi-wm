@@ -27,7 +27,8 @@ the identifiers in brackets.
   `float: false` undoes it.
 - **[U6] When.** Rules apply when sugoi manages a window, before it shows; for a window
   adopted at startup, a workspace kept in `_NET_WM_DESKTOP` ([V9]) wins over `workspace:`,
-  and `size:` and `center:` do not apply: it keeps the geometry it had.
+  and `size:` and `center:` do not apply: it keeps the geometry it had. For a new
+  window, `workspace:` wins over the one its app asks for ([V10]).
   They apply again when a managed window's `WM_CLASS` changes, as some apps set it only
   after mapping.
 - **[U7] Elsewhere.** A new window a rule puts on another workspace stays hidden, and
