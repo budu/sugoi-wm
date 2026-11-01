@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc db2541443f3299b3211ee69798a79a5df4da1b9c903c1e432d17424f74fb1116 # shrinks to area = Rect { x: 0, y: 0, width: 1, height: 38 }, master = Master { side: Right, width: 0.05 }, shares = [0.5, 20.0, 1.5, 0.01]
+cc 01ac0554f17cd6be2b3d600a5f5e57ffc62122599be9d81cabf3a510b4328f26 # shrinks to mut shares = [0.01, 0.01, 0.05], index = 0, delta = 0.8417711
+cc 2049dcedd7533204f0afbc7ac286ad8df41ac9f7908b88316cfd9178c7d2ab28 # shrinks to area = Rect { x: 0, y: 0, width: 1, height: 33 }, master = Master { side: Right, width: 0.05 }, shares = [1.0, 0.1, 1.0, 3.0, 0.5, 1.0]

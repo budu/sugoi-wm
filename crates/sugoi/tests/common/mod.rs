@@ -56,6 +56,25 @@ impl Drop for Xvfb {
     }
 }
 
+/// The number of cases a property runs: `base` in the gates, times the positive integer
+/// `SUGOI_PROPTEST_SCALE` for a long run.
+///
+/// # Panics
+///
+/// When the variable is set to anything but a positive integer, so a mistyped scale
+/// never silently runs the base counts.
+pub fn cases(base: u32) -> u32 {
+    let scale = match std::env::var("SUGOI_PROPTEST_SCALE") {
+        Err(std::env::VarError::NotPresent) => 1,
+        Ok(value) if value.trim().is_empty() => 1,
+        Ok(value) => value.trim().parse::<u32>().ok().filter(|n| *n > 0).unwrap_or_else(|| {
+            panic!("SUGOI_PROPTEST_SCALE must be a positive integer, not {value:?}")
+        }),
+        Err(error) => panic!("SUGOI_PROPTEST_SCALE: {error}"),
+    };
+    base.saturating_mul(scale)
+}
+
 /// A script with fixed settings, without Ruby.
 pub struct Fixed(pub Settings);
 

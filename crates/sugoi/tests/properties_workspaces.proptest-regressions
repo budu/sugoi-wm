@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 70a000e7f3db0343989850d5b33f0d2a4f090111ce1c1a27813a531531d4826b # shrinks to ops = [Workspace(3), Previous, Back, Map, Map, Workspace(1), Workspace(3)]
+cc 4e7a2d620a82da698e67f6a4dc997681fd84bc84ccd1241833e5d8e5f55f4b8c # shrinks to ops = [Next, Map, Map, Workspace(1), Back, Workspace(1), FocusNext, Workspace(1), Workspace(2)]
+cc 261a5898d37edbe50e1d4dcad06cd2ab263d576ad20cd4d739910f5673e36cd9 # shrinks to ops = [Next, Back, Back]
+cc 18904ad7dbff40fc1169786956be9dd55a45b87246e682a732757f60095a2722 # shrinks to ops = [Map, Minimize, Next, Restore, Workspace(1)]

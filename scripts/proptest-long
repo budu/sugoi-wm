@@ -1,0 +1,12 @@
+#!/bin/sh
+# The workspace's tests with property-test case counts raised twentyfold (or to
+# $SUGOI_PROPTEST_SCALE), before a milestone's close and a release; prints how long the
+# run took, for the progress log. Arguments go to cargo nextest.
+set -u
+scale=${SUGOI_PROPTEST_SCALE:-20}
+started=$(date +%s)
+SUGOI_PROPTEST_SCALE=$scale cargo nextest run --workspace "$@"
+status=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'proptest-long: SUGOI_PROPTEST_SCALE=%s, %dm%02ds\n' "$scale" $((elapsed / 60)) $((elapsed % 60)) >&2
+exit $status

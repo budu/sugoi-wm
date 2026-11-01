@@ -60,17 +60,20 @@ pub fn tile(area: Rect, master: Master, shares: &[f32]) -> Vec<Rect> {
         Side::Right => (area.x + stack_width as i32, area.x),
     };
     let mut cells = vec![Rect::new(master_x, area.y, master_width, area.height)];
+    // Round the boundaries, not the heights: cells then fill the column exactly and can
+    // never pass its end, whatever the rounding of each.
     let total: f32 = shares.iter().sum();
-    let mut y = area.y;
-    for (index, share) in shares.iter().enumerate() {
-        // The last cell takes what rounding left, so the column is exactly filled.
-        let height = if index + 1 == shares.len() {
-            (area.y + area.height as i32 - y) as u32
-        } else {
-            (area.height as f32 * share / total).round() as u32
-        };
-        cells.push(Rect::new(stack_x, y, stack_width, height));
-        y += height as i32;
+    let mut sum = 0.0;
+    let mut top = 0u32;
+    for share in shares {
+        sum += share;
+        let bottom = ((area.height as f32 * sum / total).round() as u32).min(area.height);
+        cells.push(Rect::new(stack_x, area.y + top as i32, stack_width, bottom - top));
+        top = bottom;
+    }
+    // Rounding the last boundary may stop short of the end by float error.
+    if let Some(last) = cells.last_mut() {
+        last.height = area.height - (last.y - area.y) as u32;
     }
     cells
 }
@@ -189,7 +192,7 @@ mod tests {
     fn stack_cells_fill_the_column_exactly() {
         let cells = tile(Rect::new(0, 0, 100, 100), Master::default(), &[1.0, 1.0, 1.0]);
         let heights: Vec<u32> = cells[1..].iter().map(|c| c.height).collect();
-        assert_eq!(heights, [33, 33, 34]);
+        assert_eq!(heights, [33, 34, 33]);
     }
 
     fn close(a: f32, b: f32) -> bool {
