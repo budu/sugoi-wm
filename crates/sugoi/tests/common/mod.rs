@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use sugoi::{Command, Defaults, Error, Handle, Wm};
+use sugoi::{Command, Error, Handle, Layout, Script, Settings, Wm};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -54,6 +54,24 @@ impl Drop for Xvfb {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// A script with fixed settings, without Ruby.
+pub struct Fixed(pub Settings);
+
+impl Script for Fixed {
+    fn load(&mut self) -> Result<Settings, String> {
+        Ok(self.0.clone())
+    }
+
+    fn run(&mut self, block: usize) -> Result<Vec<Command>, String> {
+        Err(format!("no block {block}"))
+    }
+}
+
+/// The default settings with only the float layout.
+pub fn floating() -> Settings {
+    Settings { layouts: vec![Layout::Float], ..Settings::default() }
 }
 
 /// Waits up to 3 s for `condition`, then panics with `what`.
@@ -186,11 +204,23 @@ impl Session {
         Session { x, conn, root, wm: None, binary: None }
     }
 
+    /// Starts sugoi in the float layout, where windows keep the geometry tests give them.
     pub fn start_wm(&mut self) {
+        self.start_wm_with(floating());
+    }
+
+    /// An X server with sugoi running `settings`.
+    pub fn with_settings(settings: Settings) -> Session {
+        let mut session = Session::without_wm();
+        session.start_wm_with(settings);
+        session
+    }
+
+    pub fn start_wm_with(&mut self, settings: Settings) {
         let display = self.x.display.clone();
         let (sender, receiver) = mpsc::channel();
         let thread = thread::spawn(move || {
-            let wm = Wm::new(Some(&display), Box::new(Defaults))?;
+            let wm = Wm::new(Some(&display), Box::new(Fixed(settings)))?;
             sender.send(wm.handle()).unwrap();
             wm.run()
         });
@@ -291,6 +321,30 @@ impl Session {
         self.conn.get_geometry(window).ok()?.reply().ok()
     }
 
+    /// The window's outer rectangle: x, y, and size with the border.
+    pub fn outer(&self, window: Window) -> (i32, i32, u32, u32) {
+        let g = self.geometry(window).unwrap();
+        let border = 2 * u32::from(g.border_width);
+        (g.x.into(), g.y.into(), u32::from(g.width) + border, u32::from(g.height) + border)
+    }
+
+    /// Drags with `button` and `key` held, from `from` to `to`, pausing after the press so
+    /// sugoi can grab the pointer.
+    pub fn drag(&self, key: u8, button: u8, from: (i16, i16), to: (i16, i16)) {
+        let fake = |kind, detail, x, y| {
+            self.conn.xtest_fake_input(kind, detail, 0, self.root, x, y, 0).unwrap();
+            self.conn.sync().unwrap();
+        };
+        fake(MOTION_NOTIFY_EVENT, 0, from.0, from.1);
+        fake(KEY_PRESS_EVENT, key, 0, 0);
+        fake(BUTTON_PRESS_EVENT, button, 0, 0);
+        settle();
+        fake(MOTION_NOTIFY_EVENT, 0, to.0, to.1);
+        settle();
+        fake(BUTTON_RELEASE_EVENT, button, 0, 0);
+        fake(KEY_RELEASE_EVENT, key, 0, 0);
+    }
+
     pub fn exists(&self, window: Window) -> bool {
         self.geometry(window).is_some()
     }
@@ -357,6 +411,9 @@ pub struct AppSpec {
     pub input: Option<bool>,
     pub protocols: Vec<&'static str>,
     pub events: EventMask,
+    /// Whether `WM_NORMAL_HINTS` gives the position as the user's ([W2]), so a floating
+    /// window stays where the test puts it.
+    pub positioned: bool,
 }
 
 impl AppSpec {
@@ -370,6 +427,7 @@ impl AppSpec {
             input: None,
             protocols: Vec::new(),
             events: EventMask::NO_EVENT,
+            positioned: true,
         }
     }
 }
@@ -403,6 +461,25 @@ impl App {
             &attributes,
         )
         .unwrap();
+        if spec.positioned {
+            // USPosition and USSize, then x, y, width, height; the other 13 fields unset.
+            let mut hints = [0u32; 18];
+            hints[..5].copy_from_slice(&[
+                1 | 2,
+                spec.x as u32,
+                spec.y as u32,
+                u32::from(spec.width),
+                u32::from(spec.height),
+            ]);
+            conn.change_property32(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_NORMAL_HINTS,
+                AtomEnum::WM_SIZE_HINTS,
+                &hints,
+            )
+            .unwrap();
+        }
         if let Some(input) = spec.input {
             // WM_HINTS with only the input flag set.
             let hints = [1, u32::from(input), 0, 0, 0, 0, 0, 0, 0];

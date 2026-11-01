@@ -180,7 +180,7 @@ fn d3_a_later_binding_of_a_chord_replaces_the_earlier() {
 /// [D4]
 #[test]
 fn d4_a_button_on_a_window_focuses_it_and_consumes_the_press() {
-    let session = Session::with_config("button(\"Mod-1\") { close }\n");
+    let session = Session::with_config("layouts :float\nbutton(\"Mod-1\") { close }\n");
     let events = EventMask::BUTTON_PRESS;
     let spec =
         AppSpec { events, protocols: vec!["WM_DELETE_WINDOW"], ..AppSpec::at(0, 0, 200, 200) };
@@ -394,7 +394,8 @@ fn d6_root_buttons_leave_the_windows_their_clicks() {
 /// [L4]
 #[test]
 fn l4_a_failed_reload_keeps_a_config_without_keys() {
-    let mut session = Session::with_config("border width: 5\nroot_button(\"3\") { reload }\n");
+    let mut session =
+        Session::with_config("layouts :float\nborder width: 5\nroot_button(\"3\") { reload }\n");
     let app = session.app(AppSpec::at(0, 0, 200, 200));
     app.map();
     eventually("border 5", || session.geometry(app.window).unwrap().border_width == 5);
