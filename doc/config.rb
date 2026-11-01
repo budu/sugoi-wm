@@ -51,6 +51,17 @@ key("Mod-Ctrl-space") { toggle :floating }
 key("Mod-n") { minimize }
 key("Mod-Ctrl-n") { restore }
 
+# Workspaces: Mod-1 to Mod-0 by keycode, pressed again to cycle on to 11 to 30
+(1..10).each do |n|
+  key("Mod-##{9 + n}") { workspace n }
+  key("Mod-Shift-##{9 + n}") { move_to n }
+end
+key("Mod-Left") { workspace :previous }
+key("Mod-Right") { workspace :next }
+key("Mod-Escape") { workspace :back }
+root_button("4") { workspace :next }
+root_button("5") { workspace :previous }
+
 # Mouse
 button("Mod-1") { move }
 button("Mod-3") { resize }

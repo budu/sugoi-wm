@@ -535,3 +535,28 @@ fn y7_a_master_width_out_of_range_fails_the_load() {
     let notes = notifications(&mut session);
     assert!(notes[0].contains("master width must be between 0.05 and 0.95"), "{notes:?}");
 }
+
+/// [V4] and [V8]
+#[test]
+fn v4_the_workspace_actions_queue_commands() {
+    let session =
+        Session::with_config("key(\"Mod-x\") { workspace 2 }\nkey(\"Mod-z\") { move_to 12 }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 100));
+    app.map();
+    eventually("focused", || session.focus() == app.window);
+    session.keys(&[SUPER, Z]);
+    eventually("moved", || !session.viewable(app.window));
+    session.keys(&[SUPER, X]);
+    session.keys(&[SUPER, X]);
+    eventually("on 12, shown", || session.viewable(app.window));
+}
+
+/// [V4] and [R1]
+#[test]
+fn v4_a_workspace_out_of_range_is_an_error() {
+    let mut session = Session::with_config("key(\"Mod-x\") { workspace 31 }\n");
+    session.keys(&[SUPER, X]);
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("workspaces are numbered 1 to 30, not 31"), "{notes:?}");
+}

@@ -93,6 +93,24 @@ each section.
 
 ## Workspaces
 
+- **One rule for mapping** (M4). A window shows when it is on the current workspace and
+  not minimized; `show` maps or unmaps to match, counting its unmaps, so minimize,
+  switches and moves cannot disagree on a window's state.
+- **Hidden windows are iconic** (M4). Windows on other workspaces get `IconicState`, as
+  minimized ones do, and keep their geometry and states.
+- **The focus after a switch is the history's** (M4), as awesome restores a tag's last
+  focused client; crossings from the switch are dropped. The pointer wins only after a
+  close ([Z2]).
+- **`_NET_WM_DESKTOP` now, the rest of EWMH in M7** (M4). A restart must keep each
+  window's workspace, and that property is where EWMH keeps it; quit maps every window
+  so the next WM adopts them.
+- **`workspace 11` to `30` are exact** (M4). Only 1 to 10 cycle, so a config can name a
+  later workspace directly; rules (M5) can use the same numbers.
+- **The defaults bind the workspace keys** (M4), so a session without a config can
+  still use more than one workspace.
+- **Properties need a barrier** (M4). A configure request on an unmapped window of the
+  test's own reaches sugoi after everything sent before, changes no managed state, and
+  shows in the window's width once handled.
 - **Cycling by repeat** (user, 2026-10-31). Mod-n goes to n, then n+10, n+20, wrapping,
   decided by the current workspace rather than a timeout. Empty workspaces are not
   skipped, so a press always lands in the same place; polybar hides empty ones.
