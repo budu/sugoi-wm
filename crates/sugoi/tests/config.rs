@@ -560,3 +560,104 @@ fn v4_a_workspace_out_of_range_is_an_error() {
     let notes = notifications(&mut session);
     assert!(notes[0].contains("workspaces are numbered 1 to 30, not 31"), "{notes:?}");
 }
+
+/// [U2] [U3] The rule DSL, with the awesome config's second-browser hook ([H1], [H3]).
+#[test]
+fn h1_the_second_browser_on_a_workspace_floats() {
+    let session = Session::with_config(
+        r#"
+        rule class: "Thunar", float: true
+        BROWSERS = %w[Chromium firefox]
+        on(:manage) do |window|
+          next unless BROWSERS.include?(window.class_name)
+          if windows(workspace: window.workspace).count { |w| BROWSERS.include?(w.class_name) } > 1
+            window.float
+            window.size 600, 400
+            window.center
+          end
+        end
+        "#,
+    );
+    let first = session.app(AppSpec::at(0, 0, 200, 100).class("Navigator", "firefox"));
+    first.map();
+    eventually("first tiled", || session.outer(first.window) == (0, 0, 1280, 800));
+    let second = session.app(AppSpec::at(0, 0, 200, 100).class("chromium", "Chromium"));
+    second.map();
+    eventually("second floats", || session.outer(second.window) == (337, 197, 606, 406));
+    assert_eq!(session.outer(first.window), (0, 0, 1280, 800));
+    let thunar = session.app(AppSpec::at(10, 10, 200, 100).class("thunar", "Thunar"));
+    thunar.map();
+    eventually("thunar floats", || session.focus() == thunar.window);
+    assert_eq!(session.outer(thunar.window), (10, 10, 206, 106));
+}
+
+/// [H1] [H2]
+#[test]
+fn h1_hooks_see_read_only_windows_and_workspaces() {
+    let mut session = Session::with_config(
+        r#"
+        key("Mod-x") { workspace 2 }
+        on(:focus) { |w| spawn "focus", w.class_name, w.instance, w.title, w.type.to_s, w.transient?.to_s, w.workspace.to_s, w.floating?.to_s, w.frozen?.to_s }
+        on(:unmanage) { |w| spawn "gone", w.class_name }
+        on(:workspace) { |n| spawn "ws", n.to_s }
+        "#,
+    );
+    // The harness's marker window ran the focus and unmanage hooks already.
+    eventually("marker seen", || spawns(&mut session).len() == 2);
+    let spec = AppSpec { title: Some("hello"), ..AppSpec::at(0, 0, 200, 100) };
+    let app = session.app(spec.class("kitty", "kitty"));
+    app.map();
+    eventually("focus hook", || spawns(&mut session).len() == 3);
+    assert_eq!(
+        spawns(&mut session)[2],
+        spawned("focus", "focus kitty kitty hello normal false 1 false true")
+    );
+    session.keys(&[SUPER, X]);
+    eventually("workspace hook", || spawns(&mut session).len() == 4);
+    app.conn.destroy_window(app.window).unwrap();
+    app.conn.flush().unwrap();
+    eventually("unmanage hook", || spawns(&mut session).len() == 5);
+    let mut logged = spawns(&mut session)[3..].to_vec();
+    logged.sort();
+    assert_eq!(logged, [spawned("gone", "gone kitty"), spawned("ws", "ws 2")]);
+}
+
+/// [H4]
+#[test]
+fn h4_hooks_do_not_run_for_their_own_actions() {
+    let mut session = Session::with_config(
+        "key(\"Mod-x\") { focus :next }\non(:focus) { |w| spawn \"seen\"; focus :next }\n",
+    );
+    // The harness's marker ran the hook once.
+    eventually("marker seen", || spawns(&mut session).len() == 1);
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("seen for a", || spawns(&mut session).len() == 2);
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    b.map();
+    // b's focus runs the hook, whose `focus :next` moves the focus to a without a hook.
+    eventually("seen for b", || spawns(&mut session).len() == 3);
+    settle();
+    assert_eq!(spawns(&mut session).len(), 3);
+    assert_eq!(session.focus(), a.window);
+}
+
+/// [H4] and [R1]
+#[test]
+fn h4_a_raising_hook_is_reported() {
+    let mut session = Session::with_config("on(:manage) { |w| raise \"no #{w.class_name}\" }\n");
+    let app = session.app(AppSpec::at(0, 0, 200, 100).class("kitty", "kitty"));
+    app.map();
+    let ending = "config.rb:1: no kitty (RuntimeError)";
+    eventually("notified", || notifications(&mut session).iter().any(|n| n.ends_with(ending)));
+    eventually("still managed and shown", || session.viewable(app.window));
+}
+
+/// [U2]
+#[test]
+fn u2_an_unknown_rule_option_fails_the_load() {
+    let mut session = Session::with_config("rule klass: \"x\", float: true\n");
+    eventually("notified", || !notifications(&mut session).is_empty());
+    let notes = notifications(&mut session);
+    assert!(notes[0].contains("unknown rule option :klass"), "{notes:?}");
+}

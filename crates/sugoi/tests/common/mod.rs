@@ -437,6 +437,12 @@ pub struct AppSpec {
     /// Whether `WM_NORMAL_HINTS` gives the position as the user's ([W2]), so a floating
     /// window stays where the test puts it.
     pub positioned: bool,
+    /// [U1] `WM_CLASS` as (instance, class), `WM_NAME`, a `_NET_WM_WINDOW_TYPE_*` atom
+    /// name, and a window this one is transient for.
+    pub class: Option<(&'static str, &'static str)>,
+    pub title: Option<&'static str>,
+    pub kind: Option<&'static str>,
+    pub transient_for: Option<Window>,
 }
 
 impl AppSpec {
@@ -451,7 +457,16 @@ impl AppSpec {
             protocols: Vec::new(),
             events: EventMask::NO_EVENT,
             positioned: true,
+            class: None,
+            title: None,
+            kind: None,
+            transient_for: None,
         }
+    }
+
+    /// The same window with `WM_CLASS` (instance, class).
+    pub fn class(self, instance: &'static str, class: &'static str) -> AppSpec {
+        AppSpec { class: Some((instance, class)), ..self }
     }
 }
 
@@ -500,6 +515,34 @@ impl App {
                 AtomEnum::WM_NORMAL_HINTS,
                 AtomEnum::WM_SIZE_HINTS,
                 &hints,
+            )
+            .unwrap();
+        }
+        if let Some((instance, class)) = spec.class {
+            set_class(&conn, window, instance, class);
+        }
+        if let Some(title) = spec.title {
+            conn.change_property8(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_NAME,
+                AtomEnum::STRING,
+                title.as_bytes(),
+            )
+            .unwrap();
+        }
+        if let Some(kind) = spec.kind {
+            let (property, value) = (atom(&conn, "_NET_WM_WINDOW_TYPE"), atom(&conn, kind));
+            conn.change_property32(PropMode::REPLACE, window, property, AtomEnum::ATOM, &[value])
+                .unwrap();
+        }
+        if let Some(parent) = spec.transient_for {
+            conn.change_property32(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_TRANSIENT_FOR,
+                AtomEnum::WINDOW,
+                &[parent],
             )
             .unwrap();
         }
@@ -557,6 +600,19 @@ impl App {
                 if m.type_ == protocols && m.data.as_data32()[0] == wanted)
         });
     }
+}
+
+/// Sets `WM_CLASS`: the instance and the class, each ended by a zero byte.
+pub fn set_class(conn: &RustConnection, window: Window, instance: &str, class: &str) {
+    let value = format!("{instance}\0{class}\0");
+    conn.change_property8(
+        PropMode::REPLACE,
+        window,
+        AtomEnum::WM_CLASS,
+        AtomEnum::STRING,
+        value.as_bytes(),
+    )
+    .unwrap();
 }
 
 fn atom(conn: &RustConnection, name: &str) -> Atom {
