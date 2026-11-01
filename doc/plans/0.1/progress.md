@@ -8,6 +8,7 @@ section.
 
 | Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
 |-----------|------------|------------|-------|---------|---------|----------------------|
+| M6        | 2026-11-01 | 2026-11-01 | 0.3   | 7       | 171/171 | 16 fixed, 3 declined |
 | M5        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 160/160 | 19 fixed, 1 declined |
 | M4        | 2026-11-01 | 2026-11-01 | 0.5   | 8       | 139/139 | 18 fixed, 1 declined |
 | M3        | 2026-11-01 | 2026-11-01 | 0.6   | 7       | 114/114 | 19 fixed, 1 declined |
@@ -28,6 +29,51 @@ Measured once, at the release (M8): RSS and idle CPU of the WM process. Referenc
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
 ## Entries
+
+### M6 cgroup spawning
+
+Status: closed 2026-11-01, on `m6-cgroups`, awaiting merge. No benchmarks: spawning
+is not a hot path, and the footprint is measured at the release.
+
+- **Research.** `systemd-run --scope` took about 5 ms a spawn and becomes the app
+  (same process ID), so it stays instead of a D-Bus client. The live session placed
+  the WM in `session-3.scope`, apps in scopes under the user manager's `app.slice`
+  (kitty gives each child its own), and the test shell inside Emacs's app scope:
+  hence `kill`'s bounds and a guard for sugoi's own scope.
+- **Decisions.** `systemd-run` kept; `kill` bounded to app scopes, never sugoi's;
+  a window's process from the X server (X-Resource), checked by start time before a
+  kill; `kill` is SIGKILL; kill cases on real scopes they start. All in the
+  [decision notes](../notes.md#spawning).
+- **Changes.** `doc/spec/apps.md` with 5 behaviors; `wm/apps.rs`; `spawn` takes
+  `memory:` and `cpu_weight:`; the `kill` action, and `pid`, `unit` and `kill` on hook
+  windows. Zed's binding and rule are gone from `doc/config.rb` (no longer used).
+  Code: 3,853 lines (3,605 after M5); tests: 3,738 lines (3,565).
+- **Tests.** Kill cases start their own scopes with an xterm inside, and run `kill` only
+  on those; config cases cover limits, a bad and a zero limit, a hook seeing pid and
+  unit, and the fallback to close when `systemctl` fails. Mutations skipping the kill,
+  the `app.slice` check or the machine check (before X-Resource replaced it) each
+  failed a case.
+- **Review.** `/code-review high` on the branch, then on the fixes.
+
+  | Round     | P1 | P2 | P3 | Resolution                          |
+  |-----------|---:|---:|---:|-------------------------------------|
+  | Review    |  1 |  6 |  3 | 9 fixed in `36ab195`, 1 declined    |
+  | Re-review |  1 |  4 |  4 | 7 fixed in `f3f5fcc`, 2 declined    |
+
+  The P1s: `kill` trusted `_NET_WM_PID`, which can be stale and reused by another app,
+  and the X-Resource process can also exit while a child keeps the connection; both
+  could have killed an unrelated app. The P2s: sandbox process IDs, late or oddly
+  typed properties, `systemctl stop` waiting 90 s, `MemoryMax=0`, managing failing
+  without X-Resource, and `setsid` hiding a failed kill. Declined: killing a terminal
+  that shares an app's scope ([A4] says so), hooks' unit at manage time ([A5]), and an
+  XID slot reused during manage.
+- **Process.** One slip, caught at once: a `git checkout` used to undo a mutation
+  reverted a file's uncommitted M6 changes, which were rewritten and committed before
+  going on; mutations since restore from a copy.
+- **Long runs.** `scripts/proptest-long`: 171 tests, 171 passed, in 1 min 43 s at
+  scale 20, none leaky, no test scope left.
+- **Left open.** EWMH (M7).
+- **Hours.** 0.3 (main thread 0.3, background 0.0), from `agent-hours`.
 
 ### M5 Rules and hooks
 

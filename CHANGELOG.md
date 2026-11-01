@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Apps and cgroups** (M6). `spawn` takes `memory:` and `cpu_weight:` limits for the
+  app's scope; `kill` ends every process of the focused window's app scope (never
+  sugoi's own, nor the X session's), and closes the window otherwise; hooks see a
+  window's `pid` and `unit`. A window's process comes from the X server, not
+  `_NET_WM_PID`. See `doc/spec/apps.md`.
 - **Rules and hooks** (M5). `rule class: "Thunar", float: true` and the like match
   windows by class, instance, title, type or transience, and float, size, center,
   raise, make master or send them to a workspace; dialogs, transients, splash and
