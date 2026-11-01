@@ -6,6 +6,7 @@ pub mod layout;
 pub mod ruby;
 pub mod spawn;
 mod wm;
+pub mod workspace;
 
 use std::fmt;
 use std::io::Write;
@@ -83,7 +84,19 @@ impl Default for Settings {
                 Binding::commands("Mod-Shift-q", vec![Command::CloseFocused]),
                 Binding::commands("Mod-Shift-e", vec![Command::Quit]),
                 Binding::commands("Mod-Ctrl-r", vec![Command::Reload]),
-            ],
+            ]
+            .into_iter()
+            // [V4] [V8] The keys 1 to 0 are keycodes 10 to 19 on most layouts.
+            .chain((1..=10u32).flat_map(|n| {
+                [
+                    Binding::commands(
+                        &format!("Mod-#{}", 9 + n),
+                        vec![Command::Workspace(Goto::Number(n))],
+                    ),
+                    Binding::commands(&format!("Mod-Shift-#{}", 9 + n), vec![Command::MoveTo(n)]),
+                ]
+            }))
+            .collect(),
             buttons: Vec::new(),
             root_buttons: Vec::new(),
             layouts: vec![Layout::Tile, Layout::Max, Layout::Float],
@@ -104,6 +117,16 @@ pub enum Choice {
     Next,
     Previous,
     Pick(Layout),
+}
+
+/// [V4] to [V6] A workspace to switch to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Goto {
+    /// 1 to 10 cycle through their class; 11 to 30 are exact.
+    Number(u32),
+    Next,
+    Previous,
+    Back,
 }
 
 /// A state `toggle` turns on or off ([W1] to [W5]).
@@ -150,6 +173,10 @@ pub enum Command {
     Move,
     /// [G2]
     Resize,
+    /// [V4] to [V6]
+    Workspace(Goto),
+    /// [V8]
+    MoveTo(u32),
 }
 
 /// The configuration's code: loads settings and runs the blocks bindings point to.

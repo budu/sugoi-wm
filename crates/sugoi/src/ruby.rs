@@ -7,7 +7,8 @@ use magnus::prelude::*;
 use magnus::{ArgList, RModule, RString, Ruby, TryConvert, Value};
 
 use crate::{
-    Binding, Border, Choice, Command, Direction, Layout, Master, Script, Settings, Side, State,
+    Binding, Border, Choice, Command, Direction, Goto, Layout, Master, Script, Settings, Side,
+    State,
 };
 
 pub struct RubyScript {
@@ -141,6 +142,15 @@ fn command(parts: &[String]) -> Result<Command, String> {
             ("center", []) => Command::Center(None),
             ("center", [size]) => Command::Center(Some(number(size)?)),
             ("move", []) => Command::Move,
+            ("workspace", [target]) => Command::Workspace(match target.as_str() {
+                "next" => Goto::Next,
+                "previous" => Goto::Previous,
+                "back" => Goto::Back,
+                n => Goto::Number(n.parse().map_err(|_| format!("bad workspace {n:?}"))?),
+            }),
+            ("move_to", [n]) => {
+                Command::MoveTo(n.parse().map_err(|_| format!("bad workspace {n:?}"))?)
+            }
             ("resize", []) => Command::Resize,
             _ => return Err(format!("bad command {parts:?}")),
         },
@@ -179,6 +189,9 @@ mod tests {
         assert_eq!(parse(&["center"]), Ok(Command::Center(None)));
         assert_eq!(parse(&["center", "0.7"]), Ok(Command::Center(Some(0.7))));
         assert_eq!(parse(&["resize"]), Ok(Command::Resize));
+        assert_eq!(parse(&["workspace", "13"]), Ok(Command::Workspace(Goto::Number(13))));
+        assert_eq!(parse(&["workspace", "back"]), Ok(Command::Workspace(Goto::Back)));
+        assert_eq!(parse(&["move_to", "3"]), Ok(Command::MoveTo(3)));
     }
 
     #[test]

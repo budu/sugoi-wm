@@ -1,5 +1,6 @@
 //! The window manager: X connection, managed windows, focus and the event loop.
 
+mod desks;
 mod place;
 
 use std::collections::{HashMap, VecDeque};
@@ -27,6 +28,7 @@ use crate::keyboard::Keyboard;
 use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
 use crate::{Action, Border, Command, Direction, Error, Handle, Script, Settings};
+use desks::Desk;
 use place::Drag;
 
 x11rb::atom_manager! {
@@ -35,6 +37,8 @@ x11rb::atom_manager! {
         WM_DELETE_WINDOW,
         WM_TAKE_FOCUS,
         WM_STATE,
+        _NET_WM_DESKTOP,
+        _NET_CURRENT_DESKTOP,
     }
 }
 
@@ -59,6 +63,10 @@ struct Client {
     fullscreen: bool,
     on_top: bool,
     minimized: bool,
+    /// [V1] The workspace index, 0 to 29.
+    workspace: usize,
+    /// [V2] Whether sugoi has the window mapped.
+    mapped: bool,
     /// [Y3] The window's share of the stack column.
     share: f32,
     /// [W6] Unmaps sugoi made whose `UnmapNotify` has not come yet.
@@ -105,8 +113,11 @@ pub struct Wm {
     loaded: bool,
     /// [Y7]
     layouts: Vec<Layout>,
-    layout: Layout,
-    master: Master,
+    /// [V3] Each workspace's layout and master column.
+    desks: Vec<Desk>,
+    /// [V1] The current workspace, and the one before the last switch ([V6]).
+    current: usize,
+    back: usize,
     /// The work area ([Y1]), and the screen for now.
     screen: Rect,
     /// [W8] Managed windows in the order they were raised, and as last stacked.
@@ -197,8 +208,12 @@ impl Wm {
             root_buttons: HashMap::new(),
             loaded: false,
             layouts: vec![Layout::Tile],
-            layout: Layout::Tile,
-            master: Master::default(),
+            desks: vec![
+                Desk { layout: Layout::Tile, master: Master::default() };
+                crate::workspace::COUNT
+            ],
+            current: 0,
+            back: 0,
             screen: Rect::new(0, 0, width, height),
             stack: Vec::new(),
             stacked: Vec::new(),
@@ -320,6 +335,8 @@ impl Wm {
             Command::Center(size) => self.center(size)?,
             Command::Move => self.start_drag(false)?,
             Command::Resize => self.start_drag(true)?,
+            Command::Workspace(goto) => self.switch(goto)?,
+            Command::MoveTo(n) => self.move_to(n)?,
         }
         Ok(())
     }
@@ -340,7 +357,7 @@ impl Wm {
                 Direction::Previous => (start + len - step) % len,
             })
             .map(|index| self.order[index])
-            .find(|&w| if focusable { self.can_focus(w) } else { !self.clients[&w].minimized })
+            .find(|&w| if focusable { self.can_focus(w) } else { self.visible(w) })
     }
 
     fn run_action(&mut self, action: Action) -> Result<(), Error> {
@@ -387,11 +404,14 @@ impl Wm {
         self.border = bindings.border;
         // [Y7] The first load starts on the first layout; a reload keeps the current one
         // if the cycle still has it.
-        if !self.loaded || !bindings.layouts.contains(&self.layout) {
-            self.layout = bindings.layouts[0];
+        // [V3] Every workspace's layout, the same way.
+        for desk in &mut self.desks {
+            if !self.loaded || !bindings.layouts.contains(&desk.layout) {
+                desk.layout = bindings.layouts[0];
+            }
+            desk.master = bindings.master;
         }
         self.layouts = bindings.layouts;
-        self.master = bindings.master;
         self.regrab(true)?;
         // [L5] Place every window again, with the new border.
         for client in self.clients.values_mut() {
@@ -520,8 +540,12 @@ impl Wm {
         Ok(())
     }
 
-    /// [S2]
+    /// [S2] [V9]
     fn adopt(&mut self) -> Result<(), Error> {
+        if let Some(current) = self.read_desktop(self.root, self.atoms._NET_CURRENT_DESKTOP)? {
+            self.current = current;
+            self.back = current;
+        }
         let tree = self.conn.query_tree(self.root)?.reply().map_err(lost)?;
         let cookies = tree
             .children
@@ -541,6 +565,9 @@ impl Wm {
             self.manage_window(window, &attributes, false)?;
         }
         self.arrange()?;
+        for window in self.order.clone() {
+            self.show(window)?;
+        }
         let pointer = self.conn.query_pointer(self.root)?.reply().map_err(lost)?;
         if self.clients.contains_key(&pointer.child) {
             self.focus(pointer.child, false)?;
@@ -638,11 +665,14 @@ impl Wm {
     /// [M1] and [M2], for a `MapRequest`.
     fn manage(&mut self, window: Window) -> Result<(), Error> {
         if let Some(client) = self.clients.get(&window) {
-            // [W6] A client maps its minimized window to show it again (ICCCM 4.1.4).
+            // [W6] A client maps its minimized window to show it again (ICCCM 4.1.4); a
+            // window on another workspace stays hidden ([V2]).
             if client.minimized {
                 return self.restore_window(window);
             }
-            self.conn.map_window(window)?;
+            if self.visible(window) {
+                self.conn.map_window(window)?;
+            }
             return Ok(());
         }
         let Some(attributes) = vanished(self.conn.get_window_attributes(window)?.reply())? else {
@@ -692,6 +722,10 @@ impl Wm {
             state,
             &[NORMAL_STATE, NONE],
         )?;
+        // [V9] An adopted window goes back on its workspace; a new one on the current.
+        let kept = if map { None } else { self.read_desktop(window, self.atoms._NET_WM_DESKTOP)? };
+        let workspace = kept.unwrap_or(self.current);
+        self.set_desktop(window, workspace)?;
         // The window's border becomes sugoi's; its inner size stays.
         let border = 2 * u32::from(self.border.width);
         let (width, height) = (u32::from(geometry.width), u32::from(geometry.height));
@@ -706,6 +740,8 @@ impl Wm {
             fullscreen: false,
             on_top: false,
             minimized: false,
+            workspace,
+            mapped: !map,
             share: 1.0,
             unmaps: 0,
         };
@@ -715,7 +751,7 @@ impl Wm {
         self.stack.push(window);
         if map {
             self.arrange()?;
-            self.conn.map_window(window)?;
+            self.show(window)?;
             // [F1]
             self.focus(window, true)?;
         }
@@ -827,13 +863,16 @@ impl Wm {
 
     /// [C2] Gives every managed window its original border back before sugoi exits.
     fn release_all(&mut self) -> Result<(), Error> {
-        for (&window, client) in &self.clients {
+        for (&window, client) in &mut self.clients {
             let border = ConfigureWindowAux::new().border_width(u32::from(client.border_width));
             self.conn.configure_window(window, &border)?;
-            // [W6] A WM started next adopts only mapped windows.
-            if client.minimized {
+            // [W6] [V9] A WM started next adopts only mapped windows.
+            if !client.mapped {
+                client.mapped = true;
                 self.conn.map_window(window)?;
-                self.set_state(window, NORMAL_STATE)?;
+                let atom = self.atoms.WM_STATE;
+                let state = [NORMAL_STATE, NONE];
+                self.conn.change_property32(PropMode::REPLACE, window, atom, atom, &state)?;
             }
         }
         Ok(())

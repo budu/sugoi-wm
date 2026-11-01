@@ -60,6 +60,16 @@ module Sugoi
     # [G1] [G2]
     def move = Sugoi.queue("move")
     def resize = Sugoi.queue("resize")
+
+    # [V4] to [V6]
+    def workspace(target)
+      return Sugoi.queue("workspace", Sugoi.workspace(target).to_s) if target.is_a?(Integer)
+
+      Sugoi.queue("workspace", Sugoi.one_of(target, %w[next previous back]))
+    end
+
+    # [V8]
+    def move_to(n) = Sugoi.queue("move_to", Sugoi.workspace(n).to_s)
   end
 
   # The object a config file runs in.
@@ -166,6 +176,12 @@ module Sugoi
     end
 
     def direction(name) = one_of(name, %w[next previous])
+
+    def workspace(n)
+      return n if n.is_a?(Integer) && (1..30).cover?(n)
+
+      raise ArgumentError, "workspaces are numbered 1 to 30, not #{n.inspect}"
+    end
 
     def one_of(name, names)
       return name.to_s if names.include?(name.to_s)

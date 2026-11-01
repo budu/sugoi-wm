@@ -6,12 +6,9 @@ use x11rb::protocol::xproto::*;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::{CURRENT_TIME, NONE};
 
-use super::{NORMAL_STATE, Wm, lost};
+use super::{Wm, lost};
 use crate::layout::{self, Layout, MAX_FACTOR, MIN_FACTOR, Rect};
 use crate::{Choice, Error, State};
-
-/// `IconicState` in `WM_STATE` (ICCCM 4.1.3.1).
-const ICONIC_STATE: u32 = 3;
 
 /// [G1] [G2] A mouse drag in progress.
 pub(super) struct Drag {
@@ -32,12 +29,13 @@ impl Wm {
     /// [Y1] Whether the layout places `window`.
     pub(super) fn tiled(&self, window: Window) -> bool {
         let c = &self.clients[&window];
-        self.layout != Layout::Float && !(c.floating || c.maximized || c.fullscreen || c.minimized)
+        self.desks[c.workspace].layout != Layout::Float
+            && !(c.floating || c.maximized || c.fullscreen || c.minimized)
     }
 
     /// [Y1] The windows the layout places, in the window order.
     pub(super) fn tiled_windows(&self) -> Vec<Window> {
-        self.order.iter().copied().filter(|&w| self.tiled(w)).collect()
+        self.order.iter().copied().filter(|&w| self.visible(w) && self.tiled(w)).collect()
     }
 
     /// [W8] The stacking layer of `window`, from the bottom.
@@ -57,7 +55,8 @@ impl Wm {
     /// [Y1] Places every window where its layout and state say, then restacks.
     pub(super) fn arrange(&mut self) -> Result<(), Error> {
         let tiled = self.tiled_windows();
-        let cells = match self.layout {
+        let desk = self.desk();
+        let cells = match desk.layout {
             Layout::Tile if !tiled.is_empty() => {
                 // [Y3] Windows come and go from the stack: keep its weights balanced.
                 let mut shares: Vec<f32> =
@@ -66,7 +65,7 @@ impl Wm {
                 for (window, &share) in tiled[1..].iter().zip(&shares) {
                     self.clients.get_mut(window).expect("tiled windows are managed").share = share;
                 }
-                layout::tile(self.screen, self.master, &shares)
+                layout::tile(self.screen, desk.master, &shares)
             }
             Layout::Max => vec![self.screen; tiled.len()],
             _ => Vec::new(),
@@ -75,7 +74,8 @@ impl Wm {
         for (&window, &cell) in tiled.iter().zip(&cells) {
             moved |= self.place(window, cell, self.border.width)?;
         }
-        let others: Vec<Window> = self.order.iter().copied().filter(|&w| !self.tiled(w)).collect();
+        let others: Vec<Window> =
+            self.order.iter().copied().filter(|&w| self.visible(w) && !self.tiled(w)).collect();
         for window in others {
             let c = &self.clients[&window];
             let (rect, border) = if c.minimized {
@@ -125,7 +125,7 @@ impl Wm {
     /// returns whether anything moved.
     pub(super) fn restack(&mut self) -> Result<bool, Error> {
         let mut stack = self.stack.clone();
-        stack.retain(|w| self.clients.get(w).is_some_and(|c| !c.minimized));
+        stack.retain(|&w| self.visible(w));
         stack.sort_by_key(|&w| self.layer(w));
         let same = stack.iter().zip(&self.stacked).take_while(|(a, b)| a == b).count();
         if same == stack.len() && same == self.stacked.len() {
@@ -151,7 +151,7 @@ impl Wm {
 
     /// [Z1] Drops the crossing events sugoi's own moves caused: a round trip, then every
     /// queued event but those is kept for the event loop.
-    fn ignore_crossings(&mut self) -> Result<(), Error> {
+    pub(super) fn ignore_crossings(&mut self) -> Result<(), Error> {
         self.conn.sync().map_err(lost)?;
         while let Some(event) = self.conn.poll_for_event()? {
             if !matches!(event, Event::EnterNotify(_)) {
@@ -164,7 +164,7 @@ impl Wm {
     /// [Y7]
     pub(super) fn choose_layout(&mut self, choice: Choice) -> Result<(), Error> {
         let len = self.layouts.len();
-        let index = self.layouts.iter().position(|&l| l == self.layout).unwrap_or(0);
+        let index = self.layouts.iter().position(|&l| l == self.desk().layout).unwrap_or(0);
         let layout = match choice {
             Choice::Next => self.layouts[(index + 1) % len],
             Choice::Previous => self.layouts[(index + len - 1) % len],
@@ -177,13 +177,14 @@ impl Wm {
                 self.clients.get_mut(&window).expect("managed").rect = rect;
             }
         }
-        self.layout = layout;
+        self.desk_mut().layout = layout;
         self.arrange()
     }
 
     /// [Y4]
     pub(super) fn master_width(&mut self, delta: f32) -> Result<(), Error> {
-        self.master.width = (self.master.width + delta).clamp(MIN_FACTOR, MAX_FACTOR);
+        let master = &mut self.desk_mut().master;
+        master.width = (master.width + delta).clamp(MIN_FACTOR, MAX_FACTOR);
         self.arrange()
     }
 
@@ -256,52 +257,46 @@ impl Wm {
     /// [W6]
     pub(super) fn minimize(&mut self) -> Result<(), Error> {
         let Some(window) = self.focused else { return Ok(()) };
-        let client = self.clients.get_mut(&window).expect("managed");
-        client.minimized = true;
-        client.unmaps += 1;
+        self.clients.get_mut(&window).expect("managed").minimized = true;
         self.minimized.push(window);
-        self.conn.unmap_window(window)?;
-        self.set_state(window, ICONIC_STATE)?;
+        self.show(window)?;
         self.arrange()?;
         self.refocus(window)
     }
 
-    /// [W6] The most recently minimized window.
+    /// [W6] [V2] The most recently minimized window of the current workspace.
     pub(super) fn restore(&mut self) -> Result<(), Error> {
-        match self.minimized.last() {
-            Some(&window) => self.restore_window(window),
+        let current = self.current;
+        let last = self.minimized.iter().rev().find(|w| self.clients[w].workspace == current);
+        match last.copied() {
+            Some(window) => self.restore_window(window),
             None => Ok(()),
         }
     }
 
+    /// [W6] Shows and focuses `window` if it is on the current workspace.
     pub(super) fn restore_window(&mut self, window: Window) -> Result<(), Error> {
         self.minimized.retain(|&w| w != window);
         self.clients.get_mut(&window).expect("minimized windows are managed").minimized = false;
-        self.set_state(window, NORMAL_STATE)?;
         self.arrange()?;
-        self.conn.map_window(window)?;
-        self.focus(window, true)
+        self.show(window)?;
+        if self.visible(window) {
+            self.focus(window, true)?;
+        }
+        Ok(())
     }
 
-    /// After a failed restart: gives the windows sugoi's borders back, and hides the
-    /// minimized ones `release_all` mapped.
+    /// After a failed restart: gives the windows sugoi's borders back, and hides again
+    /// what `release_all` mapped.
     pub(super) fn reclaim(&mut self) -> Result<(), Error> {
-        for &window in &self.minimized {
-            self.clients.get_mut(&window).expect("minimized windows are managed").unmaps += 1;
-            self.conn.unmap_window(window)?;
-            self.set_state(window, ICONIC_STATE)?;
-        }
         for client in self.clients.values_mut() {
             client.placed = None;
         }
+        for window in self.order.clone() {
+            self.show(window)?;
+        }
         self.regrab(true)?;
         self.arrange()
-    }
-
-    pub(super) fn set_state(&self, window: Window, state: u32) -> Result<(), Error> {
-        let atom = self.atoms.WM_STATE;
-        self.conn.change_property32(PropMode::REPLACE, window, atom, atom, &[state, NONE])?;
-        Ok(())
     }
 
     /// [G1] [G2] Starts dragging the window the last button press hit.
@@ -388,6 +383,9 @@ impl Wm {
             return Ok(());
         }
         self.focused = None;
+        if self.clients.contains_key(&gone) {
+            self.unfocus(gone)?;
+        }
         let pointer = self.conn.query_pointer(self.root)?.reply().map_err(lost)?.child;
         let next = Some(pointer)
             .filter(|&w| w != gone && self.can_focus(w))
@@ -404,6 +402,13 @@ impl Wm {
 
     /// Whether `window` is managed, shown, and takes the focus.
     pub(super) fn can_focus(&self, window: Window) -> bool {
-        self.clients.get(&window).is_some_and(|c| c.hints.focusable() && !c.minimized)
+        self.visible(window) && self.clients[&window].hints.focusable()
+    }
+
+    /// Gives `window` the normal border color.
+    pub(super) fn unfocus(&self, window: Window) -> Result<(), Error> {
+        let normal = ChangeWindowAttributesAux::new().border_pixel(self.border.normal);
+        self.conn.change_window_attributes(window, &normal)?;
+        Ok(())
     }
 }
