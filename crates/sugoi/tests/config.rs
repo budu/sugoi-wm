@@ -457,15 +457,18 @@ fn d5_focus_skips_windows_that_cannot_take_it() {
 /// [P1]
 #[test]
 fn p1_spawned_apps_are_not_sugois_children() {
-    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"sleep\", \"10\" }\n");
+    // A duration no other process uses, so the test can find its app again.
+    let mut session = Session::with_config("key(\"Mod-x\") { spawn \"sleep\", \"10.123\" }\n");
     session.keys(&[SUPER, X]);
-    eventually("spawned", || spawns(&mut session) == [spawned("sleep", "sleep 10")]);
+    eventually("spawned", || spawns(&mut session) == [spawned("sleep", "sleep 10.123")]);
     let pid = session.binary().pid().to_string();
     let children = || {
         let out = std::process::Command::new("pgrep").args(["-P", &pid]).output().unwrap();
         String::from_utf8(out.stdout).unwrap()
     };
     eventually("no children", || children().trim().is_empty());
+    // The app is nobody's child here: end it, so it does not outlive the test.
+    std::process::Command::new("pkill").args(["-x", "-f", "sleep 10.123"]).status().unwrap();
 }
 
 /// [C3]
