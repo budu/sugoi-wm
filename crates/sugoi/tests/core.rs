@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use sugoi::{Command, Config, Error, Wm};
+use sugoi::{Command, Defaults, Error, Wm};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -13,7 +13,7 @@ use x11rb::wrapper::ConnectionExt as _;
 #[test]
 fn s1_second_wm_exits_with_a_message() {
     let session = Session::new();
-    let error = Wm::new(Some(&session.x.display), Config::default()).err().unwrap();
+    let error = Wm::new(Some(&session.x.display), Box::new(Defaults)).err().unwrap();
     assert!(matches!(error, Error::AnotherWm(_)));
     let expected = format!("another window manager is running on {}", session.x.display);
     assert_eq!(error.to_string(), expected);
@@ -125,7 +125,7 @@ fn m4_client_unmap_unmanages_and_deletes_wm_state() {
 /// [M5]
 #[test]
 fn m5_vanished_windows_do_not_stop_the_wm() {
-    let session = Session::new();
+    let mut session = Session::new();
     for _ in 0..20 {
         let app = session.app(AppSpec::at(0, 0, 100, 100));
         app.conn.map_window(app.window).unwrap();
@@ -315,7 +315,7 @@ fn k1_close_kills_clients_without_wm_delete_window() {
 /// [C1]
 #[test]
 fn c1_close_without_focus_does_nothing() {
-    let session = Session::new();
+    let mut session = Session::new();
     assert!(session.send(Command::CloseFocused));
     session.sync();
     assert!(session.wm_running());
@@ -438,7 +438,7 @@ fn f4_globally_active_window_takes_the_focus_after_a_later_focus_change() {
 /// [F7]
 #[test]
 fn f7_malformed_wm_hints_count_as_absent() {
-    let session = Session::new();
+    let mut session = Session::new();
     let app = session.app(AppSpec::at(0, 0, 200, 200));
     // Flags announce the input and state fields, but the property ends before them.
     let hints = [3];

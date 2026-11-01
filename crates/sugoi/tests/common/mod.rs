@@ -1,13 +1,18 @@
 //! Test harness: an Xvfb server per test, sugoi in a thread, and test clients that
-//! observe the server the way real applications do.
+//! observe the server the way real applications do. Each test file uses part of it.
+#![allow(dead_code)]
 
+use std::fs;
 use std::io::{BufRead, BufReader};
-use std::process::{Child, ChildStdout, Command as Process, Stdio};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+use std::process::{Child, ChildStdout, Command as Process, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use sugoi::{Command, Config, Error, Handle, Wm};
+use sugoi::{Command, Defaults, Error, Handle, Wm};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -65,11 +70,91 @@ pub fn settle() {
     thread::sleep(Duration::from_millis(150));
 }
 
+/// Keycodes of Xvfb's default US mapping.
+pub mod keycode {
+    pub const SUPER: u8 = 133;
+    pub const SHIFT: u8 = 50;
+    pub const CTRL: u8 = 37;
+    pub const ALT: u8 = 64;
+    pub const NUM_LOCK: u8 = 77;
+    pub const RETURN: u8 = 36;
+    pub const J: u8 = 44;
+    pub const K: u8 = 45;
+    pub const Q: u8 = 24;
+    pub const E: u8 = 26;
+    pub const R: u8 = 27;
+    pub const X: u8 = 53;
+    pub const Z: u8 = 52;
+    pub const ONE: u8 = 10;
+}
+
+/// The sugoi binary running a config, with stub `systemd-run` and `notify-send` that
+/// log their arguments, one call per line.
+pub struct Binary {
+    child: Child,
+    pub dir: PathBuf,
+    pub config: PathBuf,
+}
+
+impl Binary {
+    fn start(display: &str, config: Option<&str>) -> Binary {
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+        let id = COUNT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("sugoi-test-{}-{id}", std::process::id()));
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        for (stub, log) in [("systemd-run", "spawn.log"), ("notify-send", "notify.log")] {
+            let script =
+                format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", dir.join(log).display());
+            let path = bin.join(stub);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let config_path = dir.join("config.rb");
+        if let Some(config) = config {
+            fs::write(&config_path, config).unwrap();
+        }
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        let child = Process::new(env!("CARGO_BIN_EXE_sugoi"))
+            .arg("--config")
+            .arg(&config_path)
+            .env("DISPLAY", display)
+            .env("PATH", path)
+            .stderr(fs::File::create(dir.join("stderr.log")).unwrap())
+            .spawn()
+            .unwrap();
+        Binary { child, dir, config: config_path }
+    }
+
+    /// The lines a stub logged.
+    pub fn log(&self, name: &str) -> Vec<String> {
+        let text = fs::read_to_string(self.dir.join(name)).unwrap_or_default();
+        text.lines().map(str::to_owned).collect()
+    }
+
+    pub fn status(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().unwrap()
+    }
+}
+
+impl Drop for Binary {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if thread::panicking() {
+            let log = fs::read_to_string(self.dir.join("stderr.log")).unwrap_or_default();
+            eprintln!("sugoi's stderr:\n{log}");
+        }
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
 pub struct Session {
     pub x: Xvfb,
     pub conn: RustConnection,
     pub root: Window,
     wm: Option<(Handle, JoinHandle<Result<(), Error>>)>,
+    pub binary: Option<Binary>,
 }
 
 impl Session {
@@ -86,19 +171,57 @@ impl Session {
         let x = Xvfb::start();
         let (conn, screen) = x11rb::connect(Some(&x.display)).unwrap();
         let root = conn.setup().roots[screen].root;
-        Session { x, conn, root, wm: None }
+        Session { x, conn, root, wm: None, binary: None }
     }
 
     pub fn start_wm(&mut self) {
         let display = self.x.display.clone();
         let (sender, receiver) = mpsc::channel();
         let thread = thread::spawn(move || {
-            let wm = Wm::new(Some(&display), Config::default())?;
+            let wm = Wm::new(Some(&display), Box::new(Defaults))?;
             sender.send(wm.handle()).unwrap();
             wm.run()
         });
         let handle = receiver.recv_timeout(Duration::from_secs(5)).expect("sugoi failed to start");
         self.wm = Some((handle, thread));
+    }
+
+    /// An X server with the sugoi binary running `config`, ready for input.
+    pub fn with_config(config: &str) -> Session {
+        Session::with_binary(Some(config))
+    }
+
+    /// The sugoi binary without a config file.
+    pub fn without_config() -> Session {
+        Session::with_binary(None)
+    }
+
+    fn with_binary(config: Option<&str>) -> Session {
+        let mut session = Session::without_wm();
+        session.binary = Some(Binary::start(&session.x.display, config));
+        let redirect = EventMask::SUBSTRUCTURE_REDIRECT;
+        eventually("sugoi is the WM", || {
+            let attributes = session.conn.get_window_attributes(session.root);
+            let masks = attributes.unwrap().reply().unwrap().all_event_masks;
+            masks & redirect == redirect
+        });
+        session.sync();
+        session
+    }
+
+    pub fn binary(&mut self) -> &mut Binary {
+        self.binary.as_mut().unwrap()
+    }
+
+    /// Presses `keys` in order, then releases them in reverse.
+    pub fn keys(&self, keys: &[u8]) {
+        for &key in keys {
+            self.conn.xtest_fake_input(KEY_PRESS_EVENT, key, 0, self.root, 0, 0, 0).unwrap();
+        }
+        for &key in keys.iter().rev() {
+            self.conn.xtest_fake_input(KEY_RELEASE_EVENT, key, 0, self.root, 0, 0, 0).unwrap();
+        }
+        self.conn.sync().unwrap();
     }
 
     pub fn send(&self, command: Command) -> bool {
@@ -111,7 +234,10 @@ impl Session {
         thread.join().unwrap()
     }
 
-    pub fn wm_running(&self) -> bool {
+    pub fn wm_running(&mut self) -> bool {
+        if let Some(binary) = self.binary.as_mut() {
+            return binary.status().is_none();
+        }
         self.wm.as_ref().is_some_and(|(_, thread)| !thread.is_finished())
     }
 
@@ -129,6 +255,7 @@ impl Session {
         let marker = self.app(AppSpec::at(1100, 700, 20, 20));
         marker.map();
         eventually("marker managed", || self.wm_state(marker.window).is_some());
+        // Closing the marker's connection destroys it; sugoi unmanages it next.
     }
 
     pub fn focus(&self) -> Window {
