@@ -40,6 +40,11 @@ const SPACE: u8 = 65;
 enum Op {
     Map,
     Close(usize),
+    /// The app unmaps one of its shown windows (ICCCM withdrawal).
+    Withdraw(usize),
+    /// The same, while sugoi has a switch to n still to handle: under a server grab the
+    /// key comes first, the unmap second.
+    WithdrawSwitching(usize, u32),
     Workspace(u32),
     MoveTo(u32),
     Back,
@@ -55,6 +60,8 @@ fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         4 => Just(Op::Map),
         2 => (0usize..MAX_WINDOWS).prop_map(Op::Close),
+        1 => (0usize..MAX_WINDOWS).prop_map(Op::Withdraw),
+        1 => (0usize..MAX_WINDOWS, 1u32..=3).prop_map(|(i, n)| Op::WithdrawSwitching(i, n)),
         3 => (1u32..=3).prop_map(Op::Workspace),
         2 => (1u32..=3).prop_map(Op::MoveTo),
         1 => Just(Op::Back),
@@ -107,6 +114,8 @@ struct Reference {
     history: Vec<Window>,
     /// Minimized windows, latest last.
     minimized: Vec<Window>,
+    /// Windows their apps withdrew: sugoi must leave nothing of its own on them.
+    withdrawn: Vec<Window>,
     layouts: [Kind; 30],
 }
 
@@ -242,8 +251,11 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
         back: 0,
         history: Vec::new(),
         minimized: Vec::new(),
+        withdrawn: Vec::new(),
         layouts: [Kind::Tile; 30],
     };
+    // Withdrawn windows' apps stay connected, so their windows still exist.
+    let mut kept: Vec<App> = Vec::new();
     for (step, &op) in ops.iter().enumerate() {
         // `None`: any shown window may have the focus; `Some(w)`: exactly w.
         let mut expected_focus: Option<Option<Window>> = None;
@@ -270,6 +282,42 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                 model.windows.retain(|w| w.window != app.window);
                 model.history.retain(|&w| w != app.window);
                 model.minimized.retain(|&w| w != app.window);
+            }
+            Op::Withdraw(i) | Op::WithdrawSwitching(i, _) => {
+                let shown: Vec<usize> = (0..run.apps.len())
+                    .filter(|&a| {
+                        model
+                            .windows
+                            .iter()
+                            .any(|w| w.window == run.apps[a].window && model.shown(w))
+                    })
+                    .collect();
+                if shown.is_empty() {
+                    continue;
+                }
+                let app = run.apps.remove(shown[i % shown.len()]);
+                let conn = &run.session.conn;
+                if let Op::WithdrawSwitching(_, n) = op {
+                    conn.grab_server().unwrap();
+                    for (kind, key) in [(KEY_PRESS_EVENT, SUPER), (KEY_PRESS_EVENT, 9 + n as u8)]
+                        .into_iter()
+                        .chain([(KEY_RELEASE_EVENT, 9 + n as u8), (KEY_RELEASE_EVENT, SUPER)])
+                    {
+                        conn.xtest_fake_input(kind, key, 0, run.session.root, 0, 0, 0).unwrap();
+                    }
+                }
+                conn.unmap_window(app.window).unwrap();
+                conn.ungrab_server().unwrap();
+                conn.sync().unwrap();
+                model.windows.retain(|w| w.window != app.window);
+                model.history.retain(|&w| w != app.window);
+                model.withdrawn.push(app.window);
+                if let Op::WithdrawSwitching(_, n) = op
+                    && model.switch(spec_target(model.current, n))
+                {
+                    expected_focus = Some(model.switch_focus());
+                }
+                kept.push(app);
             }
             Op::Workspace(n) => {
                 run.keys(&[SUPER, 9 + n as u8]);
@@ -385,6 +433,11 @@ fn check(
                 run.desktop(w.window),
                 w.workspace
             ));
+        }
+    }
+    for &window in &model.withdrawn {
+        if run.session.wm_state(window).is_some() || run.desktop(window).is_some() {
+            return Err(format!("withdrawn {window:#x} kept WM_STATE or _NET_WM_DESKTOP"));
         }
     }
     // The focus.

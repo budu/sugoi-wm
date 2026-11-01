@@ -205,3 +205,37 @@ fn v9_workspaces_survive_a_restart() {
     assert!(session.viewable(b.window));
     assert_eq!(desktop(&session, a.window), Some(0));
 }
+
+/// [V2] and [M4], the property's shrunk case: an app withdraws its window while sugoi
+/// still has a switch to handle, so sugoi's own unmap finds it unmapped already.
+#[test]
+fn v2_a_withdrawal_racing_a_switch_unmanages_the_window() {
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xtest::ConnectionExt as _;
+    let session = session();
+    let a = app(&session);
+    let conn = &session.conn;
+    // Under a grab the key is queued for sugoi first, the unmap second.
+    conn.grab_server().unwrap();
+    for (kind, key) in [
+        (KEY_PRESS_EVENT, common::keycode::SUPER),
+        (KEY_PRESS_EVENT, common::keycode::ONE + 1),
+        (KEY_RELEASE_EVENT, common::keycode::ONE + 1),
+        (KEY_RELEASE_EVENT, common::keycode::SUPER),
+    ] {
+        conn.xtest_fake_input(kind, key, 0, session.root, 0, 0, 0).unwrap();
+    }
+    conn.unmap_window(a.window).unwrap();
+    conn.ungrab_server().unwrap();
+    conn.flush().unwrap();
+    eventually("on 2", || current(&session) == Some(1));
+    eventually("withdrawn", || session.wm_state(a.window).is_none());
+    assert_eq!(desktop(&session, a.window), None);
+}
+
+/// [V9]
+#[test]
+fn v9_the_root_names_the_current_workspace_from_the_start() {
+    let session = session();
+    assert_eq!(current(&session), Some(0));
+}

@@ -474,3 +474,30 @@ fn y3_after_a_swap_new_windows_still_get_an_average_share() {
         assert!(session.outer(app.window).3 >= 40, "{:?}", session.outer(app.window));
     }
 }
+
+/// [G1] and [V2]
+#[test]
+fn g1_a_switch_during_a_drag_ends_it() {
+    let mut settings = Settings::default();
+    settings.buttons.push(Binding::commands("Mod-1", vec![Command::Move]));
+    let session = Session::with_settings(settings);
+    let apps = map(&session, 1);
+    eventually("full", || session.outer(apps[0].window) == FULL);
+    let fake = |kind, detail, x, y| {
+        session.conn.xtest_fake_input(kind, detail, 0, session.root, x, y, 0).unwrap();
+        session.conn.sync().unwrap();
+    };
+    fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
+    fake(KEY_PRESS_EVENT, SUPER, 0, 0);
+    fake(BUTTON_PRESS_EVENT, 1, 0, 0);
+    settle();
+    // Mod-2 while the button is held: the window is hidden, and stays where it was.
+    fake(KEY_PRESS_EVENT, common::keycode::ONE + 1, 0, 0);
+    fake(KEY_RELEASE_EVENT, common::keycode::ONE + 1, 0, 0);
+    eventually("hidden", || !session.viewable(apps[0].window));
+    fake(MOTION_NOTIFY_EVENT, 0, 300, 300);
+    settle();
+    fake(BUTTON_RELEASE_EVENT, 1, 0, 0);
+    fake(KEY_RELEASE_EVENT, SUPER, 0, 0);
+    assert_eq!(session.outer(apps[0].window), FULL);
+}

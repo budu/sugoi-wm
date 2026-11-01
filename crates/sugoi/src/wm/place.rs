@@ -78,9 +78,7 @@ impl Wm {
             self.order.iter().copied().filter(|&w| self.visible(w) && !self.tiled(w)).collect();
         for window in others {
             let c = &self.clients[&window];
-            let (rect, border) = if c.minimized {
-                continue;
-            } else if c.fullscreen {
+            let (rect, border) = if c.fullscreen {
                 (self.screen, 0)
             } else if c.maximized {
                 (self.screen, self.border.width)
@@ -303,7 +301,7 @@ impl Wm {
     /// The press is the one being handled: a `move` from a key binding finds none.
     pub(super) fn start_drag(&mut self, resize: bool) -> Result<(), Error> {
         let Some((x, y, Some(window))) = self.press.take() else { return Ok(()) };
-        if !self.clients.get(&window).is_some_and(|c| !c.minimized) {
+        if !self.visible(window) {
             return Ok(());
         }
         // Grab first: if another client holds the pointer, nothing changes.
@@ -350,10 +348,10 @@ impl Wm {
         }
         let window = drag.window;
         // A key may have changed the window's state during the drag: it wins.
-        let floating = self
-            .clients
-            .get(&window)
-            .is_some_and(|c| !self.tiled(window) && !(c.maximized || c.fullscreen || c.minimized));
+        // A switch or a move may have hidden it ([V2]).
+        let floating = self.visible(window)
+            && !self.tiled(window)
+            && !(self.clients[&window].maximized || self.clients[&window].fullscreen);
         if !floating {
             return self.end_drag();
         }

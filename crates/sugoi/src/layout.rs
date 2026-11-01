@@ -71,10 +71,6 @@ pub fn tile(area: Rect, master: Master, shares: &[f32]) -> Vec<Rect> {
         cells.push(Rect::new(stack_x, area.y + top as i32, stack_width, bottom - top));
         top = bottom;
     }
-    // Rounding the last boundary may stop short of the end by float error.
-    if let Some(last) = cells.last_mut() {
-        last.height = area.height - (last.y - area.y) as u32;
-    }
     cells
 }
 

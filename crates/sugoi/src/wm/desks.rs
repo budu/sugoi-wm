@@ -1,5 +1,6 @@
 //! Workspaces: which windows show, switching and moving (`doc/spec/workspaces.md`).
 
+use x11rb::errors::ReplyError;
 use x11rb::protocol::xproto::*;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::{CURRENT_TIME, NONE};
@@ -19,14 +20,22 @@ pub(super) struct Desk {
     pub(super) master: Master,
 }
 
+/// [V9] The workspace index in a `_NET_WM_DESKTOP`-like reply, if valid; `None` for a
+/// window gone too ([M5]).
+pub(super) fn desktop(reply: Result<GetPropertyReply, ReplyError>) -> Result<Option<usize>, Error> {
+    let Some(reply) = super::vanished(reply)? else { return Ok(None) };
+    let value = reply.value32().and_then(|mut v| v.next());
+    Ok(value.map(|v| v as usize).filter(|&v| v < COUNT))
+}
+
 impl Wm {
     /// [V2] Whether `window` is on the current workspace and not minimized.
     pub(super) fn visible(&self, window: Window) -> bool {
         self.clients.get(&window).is_some_and(|c| c.workspace == self.current && !c.minimized)
     }
 
-    /// [V2] Maps or unmaps `window` to match whether it shows; an unmap is counted so
-    /// its `UnmapNotify` is not taken for a withdrawal ([W6]).
+    /// [V2] Maps or unmaps `window` to match whether it shows; an unmap's sequence number
+    /// is kept, so its `UnmapNotify` is not taken for a withdrawal ([W6]).
     pub(super) fn show(&mut self, window: Window) -> Result<(), Error> {
         let visible = self.visible(window);
         let client = self.clients.get_mut(&window).expect("shown windows are managed");
@@ -38,8 +47,9 @@ impl Wm {
             self.conn.map_window(window)?;
             self.set_state(window, NORMAL_STATE)
         } else {
-            client.unmaps += 1;
-            self.conn.unmap_window(window)?;
+            let sequence = self.conn.unmap_window(window)?.sequence_number();
+            let client = self.clients.get_mut(&window).expect("shown windows are managed");
+            client.unmaps.push_back(sequence as u16);
             self.set_state(window, ICONIC_STATE)
         }
     }
@@ -64,10 +74,8 @@ impl Wm {
         window: Window,
         property: Atom,
     ) -> Result<Option<usize>, Error> {
-        let reply = self.conn.get_property(false, window, property, AtomEnum::CARDINAL, 0, 1)?;
-        let Ok(reply) = reply.reply() else { return Ok(None) };
-        let value = reply.value32().and_then(|mut v| v.next());
-        Ok(value.map(|v| v as usize).filter(|&v| v < COUNT))
+        let cookie = self.conn.get_property(false, window, property, AtomEnum::CARDINAL, 0, 1)?;
+        desktop(cookie.reply())
     }
 
     /// [V4] to [V7]
