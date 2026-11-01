@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 
@@ -17,7 +18,10 @@ use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::{CURRENT_TIME, NONE};
 
-use crate::{Command, Config, Error, Handle};
+use crate::chord::{self, Key};
+use crate::keyboard::Keyboard;
+use crate::spawn::{notify, spawn};
+use crate::{Action, Border, Command, Defaults, Direction, Error, Handle, Script, Settings};
 
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
@@ -57,23 +61,41 @@ impl Hints {
     }
 }
 
+/// Why the event loop ends.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exit {
+    Quit,
+    Restart,
+}
+
 pub struct Wm {
     conn: RustConnection,
     root: Window,
     atoms: Atoms,
-    config: Config,
+    script: Box<dyn Script>,
+    border: Border,
+    keyboard: Keyboard,
+    /// [D3] Key chords as configured, bound to keycodes by `grab_keys`.
+    key_chords: Vec<(ModMask, Key, Action)>,
+    keys: HashMap<(u16, Keycode), Action>,
+    /// [D4]
+    buttons: HashMap<(u16, u8), Action>,
     clients: HashMap<Window, Client>,
+    /// [D5] Managed windows in the order `focus` and `swap` follow.
+    order: Vec<Window>,
     /// [F5] Managed windows, most recently focused first.
     history: Vec<Window>,
     focused: Option<Window>,
+    exit: Option<Exit>,
     commands: Receiver<Command>,
     wake: UnixStream,
     handle: Handle,
 }
 
 impl Wm {
-    /// Connects to `display` (or `$DISPLAY`), becomes its WM and adopts its windows.
-    pub fn new(display: Option<&str>, config: Config) -> Result<Wm, Error> {
+    /// Connects to `display` (or `$DISPLAY`), becomes its WM, loads the settings from
+    /// `script` and adopts the windows.
+    pub fn new(display: Option<&str>, script: Box<dyn Script>) -> Result<Wm, Error> {
         let (conn, screen) = x11rb::connect(display)?;
         let root = conn.setup().roots[screen].root;
         let atoms = Atoms::new(&conn)?.reply().map_err(lost)?;
@@ -89,6 +111,12 @@ impl Wm {
             }
             Err(e) => return Err(lost(e)),
         }
+        // [D4] Buttons on the root window; selected apart, since another client may
+        // hold this selection without being a WM.
+        let mask = mask | EventMask::BUTTON_PRESS;
+        let attributes = ChangeWindowAttributesAux::new().event_mask(mask);
+        conn.change_window_attributes(root, &attributes)?;
+        let keyboard = Keyboard::read(&conn)?;
 
         let (sender, commands) = mpsc::channel();
         let (wake, wake_writer) = UnixStream::pair()?;
@@ -98,14 +126,22 @@ impl Wm {
             conn,
             root,
             atoms,
-            config,
+            script,
+            border: Border::default(),
+            keyboard,
+            key_chords: Vec::new(),
+            keys: HashMap::new(),
+            buttons: HashMap::new(),
             clients: HashMap::new(),
+            order: Vec::new(),
             history: Vec::new(),
             focused: None,
+            exit: None,
             commands,
             wake,
             handle,
         };
+        wm.load()?;
         wm.adopt()?;
         wm.conn.flush()?;
         info!("managing {} windows", wm.clients.len());
@@ -116,23 +152,32 @@ impl Wm {
         self.handle.clone()
     }
 
-    /// Runs until [C2] quits it (`Ok`) or the connection is lost ([S3]).
+    /// Runs until [C2] quits it (`Ok`) or the connection is lost ([S3]). A restart
+    /// ([D5]) replaces the process and returns only if that fails.
     pub fn run(mut self) -> Result<(), Error> {
         loop {
+            if let Some(exit) = self.exit.take() {
+                self.release_all()?;
+                // A round trip, so the server applies the restores before sugoi exits.
+                self.conn.sync().map_err(lost)?;
+                match exit {
+                    Exit::Quit => {
+                        info!("quit");
+                        return Ok(());
+                    }
+                    Exit::Restart => {
+                        restart();
+                        self.rebind()?;
+                    }
+                }
+            }
             self.conn.flush()?;
             if let Some(event) = self.conn.poll_for_event()? {
                 self.handle_event(event)?;
                 continue;
             }
             if let Some(command) = self.next_command() {
-                if command == Command::Quit {
-                    self.release_all()?;
-                    // A round trip, so the server applies the restores before sugoi exits.
-                    self.conn.sync().map_err(lost)?;
-                    info!("quit");
-                    return Ok(());
-                }
-                self.run_command(command)?;
+                self.execute(command)?;
                 continue;
             }
             let mut fds = [
@@ -152,14 +197,200 @@ impl Wm {
         self.commands.try_recv().ok()
     }
 
-    fn run_command(&mut self, command: Command) -> Result<(), Error> {
+    fn execute(&mut self, command: Command) -> Result<(), Error> {
         match command {
+            Command::Focus(direction) => {
+                if let Some(window) = self.neighbor(direction) {
+                    self.focus(window, true)?;
+                }
+            }
+            Command::Swap(direction) => {
+                if let (Some(focused), Some(other)) = (self.focused, self.neighbor(direction)) {
+                    let a = self.order.iter().position(|&w| w == focused);
+                    let b = self.order.iter().position(|&w| w == other);
+                    if let (Some(a), Some(b)) = (a, b) {
+                        self.order.swap(a, b);
+                    }
+                }
+            }
             Command::CloseFocused => {
                 if let Some(window) = self.focused {
                     self.close(window)?;
                 }
             }
-            Command::Quit => {}
+            Command::Spawn { name, argv } => spawn(&name, &argv),
+            Command::Reload => self.load()?,
+            Command::Restart => self.exit = Some(Exit::Restart),
+            Command::Quit => self.exit = Some(Exit::Quit),
+        }
+        Ok(())
+    }
+
+    /// [D5] The window after or before the focused one in the window order, wrapping.
+    fn neighbor(&self, direction: Direction) -> Option<Window> {
+        let len = self.order.len();
+        let index = match self.focused.and_then(|f| self.order.iter().position(|&w| w == f)) {
+            Some(i) if direction == Direction::Next => (i + 1) % len,
+            Some(i) => (i + len - 1) % len,
+            None => 0,
+        };
+        self.order.get(index).copied()
+    }
+
+    fn run_action(&mut self, action: Action) -> Result<(), Error> {
+        let commands = match action {
+            Action::Commands(commands) => commands,
+            Action::Script(block) => match self.script.run(block) {
+                Ok(commands) => commands,
+                Err(message) => {
+                    report(&message);
+                    return Ok(());
+                }
+            },
+        };
+        for command in commands {
+            self.execute(command)?;
+        }
+        Ok(())
+    }
+
+    /// [L3] [L4] [L5] Loads the settings; on failure the current ones stay.
+    fn load(&mut self) -> Result<(), Error> {
+        let applied = match self.script.load() {
+            Ok(settings) => self.apply(&settings),
+            Err(message) => Err(message),
+        };
+        match applied {
+            Ok(()) => self.script.commit(),
+            Err(message) => {
+                report(&message);
+                // [L3] The first load falls back to the defaults.
+                if self.key_chords.is_empty() {
+                    let defaults = Defaults.load().expect("the defaults load");
+                    if let Err(e) = self.apply(&defaults) {
+                        report(&format!("the defaults: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks every chord, then makes `settings` current: nothing changes on an error.
+    fn apply(&mut self, settings: &Settings) -> Result<(), String> {
+        let modkey = chord::modkey(&settings.modkey)?;
+        let mut key_chords = Vec::new();
+        for binding in &settings.keys {
+            let (mods, key) = chord::key(&binding.chord, modkey)?;
+            key_chords.push((mods, key, binding.action.clone()));
+        }
+        let mut buttons = HashMap::new();
+        for binding in &settings.buttons {
+            let (mods, button) = chord::button(&binding.chord, modkey)?;
+            buttons.insert((u16::from(mods), button), binding.action.clone());
+        }
+        self.key_chords = key_chords;
+        self.buttons = buttons;
+        self.border = settings.border;
+        self.rebind().map_err(|e| e.to_string())
+    }
+
+    /// Grabs every key and button chord again, and redraws every border.
+    fn rebind(&mut self) -> Result<(), Error> {
+        self.grab_keys()?;
+        let windows: Vec<Window> = self.clients.keys().copied().collect();
+        for window in windows {
+            self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
+            self.grab_buttons(window)?;
+            let width = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
+            self.conn.configure_window(window, &width)?;
+            let color =
+                if self.focused == Some(window) { self.border.focused } else { self.border.normal };
+            let color = ChangeWindowAttributesAux::new().border_pixel(color);
+            self.conn.change_window_attributes(window, &color)?;
+        }
+        Ok(())
+    }
+
+    /// [R4] The lock modifiers a chord matches with: none, Caps Lock, Num Lock, both.
+    fn locks(&self) -> Vec<ModMask> {
+        let num = self.keyboard.num_lock;
+        let mut locks = vec![ModMask::default(), ModMask::LOCK];
+        if num != ModMask::default() {
+            locks.extend([num, num | ModMask::LOCK]);
+        }
+        locks
+    }
+
+    /// The modifiers of an event's state, without the lock modifiers and buttons.
+    fn clean(&self, state: KeyButMask) -> u16 {
+        let mods = ModMask::SHIFT
+            | ModMask::CONTROL
+            | ModMask::M1
+            | ModMask::M2
+            | ModMask::M3
+            | ModMask::M4
+            | ModMask::M5;
+        u16::from(state) & u16::from(mods) & !u16::from(self.keyboard.num_lock)
+    }
+
+    /// [D3] [R3] Binds the key chords to the keycodes of the current mapping.
+    fn grab_keys(&mut self) -> Result<(), Error> {
+        self.conn.ungrab_key(Grab::ANY, self.root, ModMask::ANY)?;
+        self.keys.clear();
+        let locks = self.locks();
+        for (mods, key, action) in &self.key_chords {
+            let codes = match *key {
+                Key::Sym(sym) => self.keyboard.keycodes(sym),
+                Key::Code(code) => vec![code],
+            };
+            for code in codes {
+                for &lock in &locks {
+                    let mods = *mods | lock;
+                    self.conn.grab_key(
+                        false,
+                        self.root,
+                        mods,
+                        code,
+                        GrabMode::ASYNC,
+                        GrabMode::ASYNC,
+                    )?;
+                }
+                self.keys.insert((u16::from(*mods), code), action.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// [F3] [D4] Click-to-focus grabs, then the button chords, which take precedence.
+    fn grab_buttons(&self, window: Window) -> Result<(), Error> {
+        for button in CLICKS {
+            self.conn.grab_button(
+                false,
+                window,
+                EventMask::BUTTON_PRESS,
+                GrabMode::SYNC,
+                GrabMode::ASYNC,
+                NONE,
+                NONE,
+                button,
+                ModMask::ANY,
+            )?;
+        }
+        for &(mods, button) in self.buttons.keys() {
+            for lock in self.locks() {
+                self.conn.grab_button(
+                    false,
+                    window,
+                    EventMask::BUTTON_PRESS,
+                    GrabMode::ASYNC,
+                    GrabMode::ASYNC,
+                    NONE,
+                    NONE,
+                    ButtonIndex::from(button),
+                    ModMask::from(mods) | lock,
+                )?;
+            }
         }
         Ok(())
     }
@@ -211,12 +442,37 @@ impl Wm {
                     self.focus(e.event, false)?;
                 }
             }
-            // [F3] The grab is synchronous: replay the press so the window gets it.
-            Event::ButtonPress(e) => {
-                if self.clients.contains_key(&e.event) {
-                    self.focus(e.event, true)?;
+            Event::KeyPress(e) => {
+                if let Some(action) = self.keys.get(&(self.clean(e.state), e.detail)).cloned() {
+                    self.run_action(action)?;
                 }
-                self.conn.allow_events(Allow::REPLAY_POINTER, e.time)?;
+            }
+            Event::ButtonPress(e) => {
+                let action = self.buttons.get(&(self.clean(e.state), e.detail)).cloned();
+                let managed = self.clients.contains_key(&e.event);
+                match action {
+                    // [D4] Focus the window, consume the press, run the block.
+                    Some(action) if managed => {
+                        self.focus(e.event, false)?;
+                        self.conn.allow_events(Allow::ASYNC_POINTER, e.time)?;
+                        self.run_action(action)?;
+                    }
+                    Some(action) if e.event == self.root && e.child == NONE => {
+                        self.run_action(action)?;
+                    }
+                    // [F3] The grab is synchronous: replay the press so the window gets it.
+                    _ => {
+                        if managed {
+                            self.focus(e.event, true)?;
+                        }
+                        self.conn.allow_events(Allow::REPLAY_POINTER, e.time)?;
+                    }
+                }
+            }
+            // [R3]
+            Event::MappingNotify(e) if e.request != Mapping::POINTER => {
+                self.keyboard = Keyboard::read(&self.conn)?;
+                self.grab_keys()?;
             }
             Event::PropertyNotify(e) => {
                 let hints: Atom = AtomEnum::WM_HINTS.into();
@@ -265,9 +521,8 @@ impl Wm {
             | EventMask::FOCUS_CHANGE
             | EventMask::PROPERTY_CHANGE
             | EventMask::STRUCTURE_NOTIFY;
-        let attributes = ChangeWindowAttributesAux::new()
-            .event_mask(mask)
-            .border_pixel(self.config.normal_color);
+        let attributes =
+            ChangeWindowAttributesAux::new().event_mask(mask).border_pixel(self.border.normal);
         self.conn.change_window_attributes(window, &attributes)?;
         let geometry = self.conn.get_geometry(window)?;
         let Some(hints) = self.read_hints(window)? else {
@@ -277,21 +532,9 @@ impl Wm {
             return Ok(());
         };
         debug!("manage {window:#x}");
-        let border = ConfigureWindowAux::new().border_width(u32::from(self.config.border_width));
+        let border = ConfigureWindowAux::new().border_width(u32::from(self.border.width));
         self.conn.configure_window(window, &border)?;
-        for button in CLICKS {
-            self.conn.grab_button(
-                false,
-                window,
-                EventMask::BUTTON_PRESS,
-                GrabMode::SYNC,
-                GrabMode::ASYNC,
-                NONE,
-                NONE,
-                button,
-                ModMask::ANY,
-            )?;
-        }
+        self.grab_buttons(window)?;
         let state = self.atoms.WM_STATE;
         self.conn.change_property32(
             PropMode::REPLACE,
@@ -301,6 +544,7 @@ impl Wm {
             &[NORMAL_STATE, NONE],
         )?;
         self.clients.insert(window, Client { hints, border_width: geometry.border_width });
+        self.order.push(window);
         self.history.push(window);
         if map {
             self.conn.map_window(window)?;
@@ -317,6 +561,7 @@ impl Wm {
             return Ok(());
         };
         self.history.retain(|&w| w != window);
+        self.order.retain(|&w| w != window);
         if !destroyed {
             // Withdrawn windows may be reused (a tray icon): leave nothing of sugoi's.
             self.conn.delete_property(window, self.atoms.WM_STATE)?;
@@ -395,7 +640,7 @@ impl Wm {
         }
         // A click on the focused window still sets the focus: a client may have moved it.
         if let Some(previous) = self.focused.filter(|&w| w != window) {
-            let normal = ChangeWindowAttributesAux::new().border_pixel(self.config.normal_color);
+            let normal = ChangeWindowAttributesAux::new().border_pixel(self.border.normal);
             self.conn.change_window_attributes(previous, &normal)?;
         }
         if hints.accepts_input {
@@ -404,7 +649,7 @@ impl Wm {
         if hints.take_focus {
             self.send_protocol(window, self.atoms.WM_TAKE_FOCUS)?;
         }
-        let focused = ChangeWindowAttributesAux::new().border_pixel(self.config.focused_color);
+        let focused = ChangeWindowAttributesAux::new().border_pixel(self.border.focused);
         self.conn.change_window_attributes(window, &focused)?;
         self.history.retain(|&w| w != window);
         self.history.insert(0, window);
@@ -485,6 +730,21 @@ fn vanished<T>(reply: Result<T, ReplyError>) -> Result<Option<T>, Error> {
     }
 }
 
-fn lost(e: ReplyError) -> Error {
+pub(crate) fn lost(e: ReplyError) -> Error {
     Error::Connection(e.to_string())
+}
+
+/// Logs a config error and shows it through `notify-send`.
+fn report(message: &str) {
+    log::error!("{message}");
+    notify(message);
+}
+
+/// [D5] Replaces the process with sugoi started the same way; returns if that fails.
+fn restart() {
+    let mut args = std::env::args_os();
+    let program = args.next().unwrap_or_else(|| "sugoi".into());
+    info!("restart");
+    let error = std::process::Command::new(&program).args(args).exec();
+    log::error!("restart failed: {error}");
 }
