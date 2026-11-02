@@ -207,6 +207,8 @@ pub enum WindowCommand {
     Close,
     /// [A4]
     Kill,
+    /// [H2] [E8] Go to it, restore it, focus it.
+    Activate,
 }
 
 /// [A1] Resource limits for a spawned app's scope; checked by the config.
@@ -356,6 +358,7 @@ pub struct Snapshot {
     /// 1 to 30.
     pub workspace: u32,
     pub floating: bool,
+    pub minimized: bool,
 }
 
 /// [H1] What a hook gets.
@@ -371,8 +374,9 @@ pub trait Script {
     fn load(&mut self) -> Result<Settings, String>;
     /// Makes the settings from the last successful `load` the ones `run` uses.
     fn commit(&mut self) {}
-    /// [R1] and [R2] Runs a block; an error message means none of its commands run.
-    fn run(&mut self, block: usize) -> Result<Vec<Command>, String>;
+    /// [R1] and [R2] Runs a key or button block with the managed windows ([H3]); an
+    /// error message means none of its commands run.
+    fn run(&mut self, block: usize, windows: &[Snapshot]) -> Result<Vec<Command>, String>;
     /// [H1] to [H4] Runs a hook's block with its argument and the managed windows.
     fn hook(
         &mut self,
@@ -400,7 +404,7 @@ impl Script for Defaults {
         Ok(Settings::default())
     }
 
-    fn run(&mut self, block: usize) -> Result<Vec<Command>, String> {
+    fn run(&mut self, block: usize, _windows: &[Snapshot]) -> Result<Vec<Command>, String> {
         Err(format!("the defaults have no block {block}"))
     }
 }

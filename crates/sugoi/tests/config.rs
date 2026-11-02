@@ -709,6 +709,43 @@ fn h2_window_center_floats_a_tiled_window() {
     eventually("floating, centered", || session.outer(app.window) == (487, 297, 306, 206));
 }
 
+/// [H2] and [H3] A key block finds the minimized windows and activates them.
+#[test]
+fn h2_h3_a_key_block_activates_the_minimized_windows() {
+    let session = Session::with_config(
+        "key(\"Mod-z\") { minimize }\n\
+         key(\"Mod-x\") { windows.select(&:minimized?).each(&:activate) }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.keys(&[SUPER, Z]);
+    eventually("b minimized", || !session.viewable(b.window));
+    session.keys(&[SUPER, X]);
+    eventually("b restored", || session.viewable(b.window));
+    eventually("b focused", || session.focus() == b.window);
+}
+
+/// [H2] `activate` goes to the window's workspace.
+#[test]
+fn h2_activate_goes_to_the_windows_workspace() {
+    let session = Session::with_config(
+        "key(\"Mod-z\") { windows.each { |w| w.move_to 3 } }\n\
+         key(\"Mod-x\") { windows.first.activate }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, Z]);
+    eventually("a on 3, hidden", || !session.viewable(a.window));
+    session.keys(&[SUPER, X]);
+    eventually("on 3 with a", || session.viewable(a.window));
+    eventually("a focused", || session.focus() == a.window);
+}
+
 /// [U6] A restart keeps a ruled window where the user put it.
 #[test]
 fn u6_an_adopted_window_keeps_its_geometry() {

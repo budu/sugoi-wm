@@ -48,9 +48,9 @@ type RuleExport = (
     Option<u32>,
 );
 /// [H2] [A5] A window for `Sugoi.run_hook`: id, class, instance, title, type, transient,
-/// workspace, floating, pid, unit.
+/// workspace, floating, pid, unit, minimized.
 type WindowExport =
-    (u32, String, String, String, String, bool, u32, bool, Option<u32>, Option<String>);
+    (u32, String, String, String, String, bool, u32, bool, Option<u32>, Option<String>, bool);
 
 fn window_export(s: &Snapshot) -> WindowExport {
     let i = &s.info;
@@ -66,6 +66,7 @@ fn window_export(s: &Snapshot) -> WindowExport {
         s.floating,
         i.pid,
         s.unit.clone(),
+        s.minimized,
     )
 }
 
@@ -172,8 +173,9 @@ impl Script for RubyScript {
         }
     }
 
-    fn run(&mut self, block: usize) -> Result<Vec<Command>, String> {
-        let value: Value = self.call("run", (block,))?;
+    fn run(&mut self, block: usize, windows: &[Snapshot]) -> Result<Vec<Command>, String> {
+        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
+        let value: Value = self.call("run", (block, windows))?;
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
@@ -275,6 +277,7 @@ fn command(parts: &[String]) -> Result<Command, String> {
                         [a, n] if a == "move_to" => WindowCommand::MoveTo(number(n)?),
                         [a] if a == "close" => WindowCommand::Close,
                         [a] if a == "kill" => WindowCommand::Kill,
+                        [a] if a == "activate" => WindowCommand::Activate,
                         _ => return Err(format!("bad window command {rest:?}")),
                     },
                 )

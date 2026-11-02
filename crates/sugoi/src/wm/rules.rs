@@ -199,6 +199,7 @@ impl Wm {
             unit: c.unit.clone(),
             workspace: c.workspace as u32 + 1,
             floating: c.floating || c.maximized || c.fullscreen || !self.tiled_layout(window),
+            minimized: c.minimized,
         }
     }
 
@@ -318,6 +319,7 @@ impl Wm {
             }
             WindowCommand::MoveTo(n) => return self.move_window(window, n),
             WindowCommand::Close => return self.close(window),
+            WindowCommand::Activate => return self.activate(window),
             WindowCommand::Kill => return self.kill(window),
         }
         self.arrange()

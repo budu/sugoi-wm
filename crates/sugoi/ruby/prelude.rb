@@ -89,7 +89,9 @@ module Sugoi
   class Window
     attr_reader :id, :class_name, :instance, :title, :type, :workspace, :pid, :unit
 
-    def initialize(id, class_name, instance, title, type, transient, workspace, floating, pid, unit)
+    def initialize(id, class_name, instance, title, type, transient, workspace, floating, pid, unit,
+                   minimized)
+      @minimized = minimized
       @pid = pid
       @unit = unit
       @id = id
@@ -105,6 +107,7 @@ module Sugoi
 
     def transient? = @transient
     def floating? = @floating
+    def minimized? = @minimized
     def float = act("float")
     def tile = act("tile")
     def size(width, height) = act("size", Integer(width).to_s, Integer(height).to_s)
@@ -113,6 +116,7 @@ module Sugoi
     def move_to(n) = act("move_to", Sugoi.workspace(n).to_s)
     def close = act("close")
     def kill = act("kill")
+    def activate = act("activate")
     def inspect = "#<Sugoi::Window #{class_name} #{title.inspect} on #{workspace}>"
 
     private
@@ -245,14 +249,17 @@ module Sugoi
     end
 
     # [R1] [R2] Runs block `index`: its commands, or an error message.
-    def run(index)
+    # [R1] [H3] Runs key or button block `index`, with the managed windows.
+    def run(index, windows)
       @queue = []
+      @windows = windows.map { |w| Window.new(*w) }.freeze
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call }
       @queue
     rescue ScriptError, StandardError => e
       safely_describe(e)
     ensure
       @queue = nil
+      @windows = nil
     end
 
     # [H1] [H4] Runs hook block `index` with a window or a workspace number, and the
@@ -285,7 +292,7 @@ module Sugoi
       @windows = nil
     end
 
-    def windows = @windows || raise("windows are only known in a hook or a request")
+    def windows = @windows || raise("windows are only known in a block or a request")
 
     def queue(*command)
       raise "actions only run inside a key or button block" unless @queue

@@ -1,6 +1,8 @@
 # sugoi config ported from ~/.config/awesome (doc/plans/0.1/parity.md).
 # Copy to ~/.config/sugoi/config.rb. Later milestones fill in what is missing.
 
+require "shellwords"
+
 border width: 3, focused: "#aa007b", normal: "#000000"
 modkey "Mod4"
 
@@ -55,6 +57,21 @@ key("Mod-n") { minimize }
 key("Mod-Ctrl-n") { restore }
 # Every window, minimized ones too: picking one goes to it and restores it ([E8]).
 key("Mod-w") { spawn "rofi", "-show", "window" }
+# Minimized windows only; rofi shows the second column, and the pick's ID goes back
+# through sugoictl to `activate` ([H2]).
+key("Mod-Shift-w") do
+  minimized = windows.select(&:minimized?)
+  if minimized.empty?
+    sh "notify-send sugoi 'No minimized windows'"
+  else
+    lines = minimized.map do |w|
+      "#{w.id}\t#{w.workspace}   #{w.class_name}   #{w.title.tr("\t\n", "  ")}"
+    end
+    rofi = "rofi -dmenu -i -no-custom -p Minimized -display-columns 2 -display-column-separator '\\t'"
+    activate = "sugoictl 'windows.find { |w| w.id == {} }&.activate'"
+    sh "printf '%s\\n' #{lines.shelljoin} | #{rofi} | cut -f1 | xargs -r -I{} #{activate}"
+  end
+end
 
 # Workspaces: Mod-1 to Mod-0 by keycode, pressed again to cycle on to 11 to 30
 (1..10).each do |n|
