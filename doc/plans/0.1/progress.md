@@ -8,6 +8,7 @@ section.
 
 | Milestone | Started    | Closed     | Hours | Commits | Tests   | Findings             |
 |-----------|------------|------------|-------|---------|---------|----------------------|
+| M8        | 2026-11-01 | 2026-11-01 | 0.4   | 8       | 204/204 | no review round      |
 | M7        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 200/200 | 17 fixed, 2 declined |
 | M6        | 2026-11-01 | 2026-11-01 | 0.3   | 7       | 171/171 | 16 fixed, 3 declined |
 | M5        | 2026-11-01 | 2026-11-01 | 0.4   | 9       | 160/160 | 19 fixed, 1 declined |
@@ -29,7 +30,40 @@ whole suite at 20 through nextest.
 Measured once, at the release (M8): RSS and idle CPU of the WM process. Reference:
 awesome 4.3 used 68.8 MiB RSS and 0.6 % CPU on 2026-10-31, with its widgets.
 
+| Run                     | RSS      | CPU                          | Windows | Commit    |
+|-------------------------|---------:|------------------------------|--------:|-----------|
+| Live session, M8        | 14.7 MiB | 1 s over 15 min 41 s (0.1 %) |       2 | `a1d60dc` |
+| Xvfb, release build, M8 | 15.2 MiB | about 0.05 % idle            |       — | `192cb4b` |
+
 ## Entries
+
+### M8 Release
+
+Status: closed 2026-11-01, on `m8-release`, awaiting merge. The 2-day trial was cut
+short: the user's first session found issues, and the user chose to release 0.1 as it
+is and bring them to 0.2. No benchmarks: the footprint is measured above.
+
+- **Research.** The user's Firefox session keeps a `workspaceID` per window (20 windows
+  on workspaces 0 to 7) and restores it through `_NET_WM_DESKTOP`, which sugoi took
+  only after a window was managed. GDM hid the session entry: it checks `TryExec` as
+  its own user, who cannot read a 0700 home.
+- **Decisions.** Apps choose a new window's workspace, a rule's `workspace:` still
+  wins (user, [notes](../notes.md#interop)); release with the trial cut short (user).
+- **Changes.** [V10] in `doc/spec/workspaces.md`, [U6] and [E9] updated;
+  `manage_window` reads `_NET_WM_DESKTOP` for new windows, and a message before the map
+  is written as the property; `contrib/sugoi.desktop` starts the session script from
+  `/usr/local/bin`; `scripts/install`. Code: 4,727 lines (4,720 after M7); tests: 4,354
+  lines (4,230).
+- **Tests.** 4 cases ([V10] twice, [U6], [E9]); the workspace history maps windows
+  asking for workspace 1, 2, 3 or an invalid one, by property or message, and fails on
+  each of three mutations (no property, no message, the app over a rule).
+- **Parity.** 46 rows: 38 delivered in `doc/config.rb`, 8 dropped with reasons.
+- **Review.** None: the user chose to release as is.
+- **Long runs.** `scripts/proptest-long`: 204 tests, 204 passed, in 1 min 32 s at
+  scale 20, none leaky; no test scope or socket left.
+- **Left open.** The first session's issues, to be described; Firefox's restore, not
+  yet seen; the `kill` and limit bindings, to discuss.
+- **Hours.** 0.4 (main thread 0.4, background 0.0), from `agent-hours`.
 
 ### M7 EWMH and IPC
 

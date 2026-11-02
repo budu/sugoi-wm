@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-11-01)
 
+The first release: an awesome replacement for one X11 monitor, configured in Ruby. See
+`doc/plans/0.1/report.md`.
+
+- **Known issues.** The first session as the user's WM found issues, not yet
+  described; they open 0.2. Firefox's restored workspaces ([V10]) are not yet seen with
+  Firefox itself.
+- **Install** (M8). `scripts/install` builds `sugoi` and `sugoictl` into `~/.cargo/bin`
+  and installs the session script, the GDM entry and the pacman hook.
 - **Workspaces apps ask for** (M8). A new window goes on the workspace its app asks
   for through `_NET_WM_DESKTOP` (Firefox restoring its session), unless a rule says
   otherwise. See [V10] in `doc/spec/workspaces.md`.
