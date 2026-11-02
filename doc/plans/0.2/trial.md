@@ -17,7 +17,7 @@ background work ran); work on `main` before a branch counts for it.
 | A way back to minimized windows  | `window-list`    | (config)     |       1 |   0.0 |
 | A restart reverses the stack     | `kept-state`     | [V11], [S2]  |       2 |   0.2 |
 | Drags float tiled windows        | `tiled-drags`    | [G1] to [G3] |       2 |   0.1 |
-| drun, superkitty: bigger, darker | `rofi-theme`     | (contrib)    |       1 |   0.0 |
+| drun, launcher: bigger, darker   | `rofi-theme`     | (contrib)    |       1 |   0.0 |
 | Widget details open as alerts    | `popup-helper`   | [O1] to [O4] |       3 |   0.3 |
 | No background, cross, tiny bar   | `trial-fixes`    | [S4], [G1]   |       3 |   0.2 |
 
@@ -36,7 +36,7 @@ property run passed 237 of 237 at scale 20 in 1 min 50 s on `kept-state`.
   claude popup lists the Claude Code sessions again, lost in the 0.1 port.
 - **rofi theme** (`rofi-theme`). rofi ran with its default theme at 96 DPI. A dark
   theme with sugoi's magenta, in `contrib/rofi/` and linked from `~/.config/rofi`;
-  superkitty's table uses a monospace font (a line in the user's dotfiles).
+  the user's session launcher uses a monospace font (a line in their dotfiles).
 - **Tiled drags** (`tiled-drags`). 0.1 floated a dragged tiled window. As awesome's
   tile does, a resize now sets the master width and the window's edge, and a move
   swaps with the window under the pointer; floating windows resize from the nearest
@@ -89,7 +89,7 @@ property run passed 237 of 237 at scale 20 in 1 min 50 s on `kept-state`.
   process is unknown; restarts won: they are matched by ID alone. Each fix has a case,
   and a mutation of each fails it.
 - **Two slips, both caught.** A test cleanup (`pkill -f "rofi -dmenu"`) closed the
-  user's open superkitty menu; cleanups now stop their own processes by PID. The
+  user's open launcher menu; cleanups now stop their own processes by PID. The
   `kept-state` commits first landed on `main`; they moved to their branch before any
   merge, and nothing was pushed.
 

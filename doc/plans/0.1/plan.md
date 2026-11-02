@@ -117,7 +117,7 @@ release.
   only on success; errors go to the log and to `notify-send` (dunst).
 - **Guard.** A watchdog stops a hook that runs past a time limit (value set by research).
 - **Chords.** No binding depends on focus: Mod-Shift-q kills the window, Mod-Shift-e
-  quits the WM, Mod-Ctrl-Return opens superkitty (the overlaps were mistakes).
+  quits the WM, Mod-Ctrl-Return opens a session launcher (the overlaps were mistakes).
 - **Artifact.** `parity.md` starts here: every awesome binding and rule, with its
   status.
 

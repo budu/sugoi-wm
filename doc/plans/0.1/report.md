@@ -11,7 +11,7 @@ judgments are the implementing agent's and are marked as such.
 | Measured commit | `a1d60dc` on `m8-release` (M1 to M8)                           |
 | Baseline        | None: the first release. awesome 4.3 is the footprint reference |
 | Benchmarks      | None planned; the footprint once, on the live session          |
-| Host            | ARCAS, Arch Linux, Linux 7.2.11, one monitor; tests under Xvfb |
+| Host            | The author's Arch Linux workstation, Linux 7.2.11; Xvfb        |
 | Toolchain       | Rust 1.98.1, x11rb 0.14, magnus 0.9, Ruby 3.4.10 (pacman)      |
 | Agent setup     | Claude Opus 5.5 implements; `/code-review high` reviews        |
 | Calendar time   | 2026-10-31 to 2026-11-01                                       |
@@ -42,7 +42,7 @@ hold the release for the 2-day trial.
 - **M2 Ruby config.** Embedded CRuby: keys, buttons and root buttons bound to Ruby
   blocks, live reload that keeps the previous config on error, time limits on blocks
   and loads, apps spawned in systemd scopes. Decided: Mod-Shift-q closes, Mod-Shift-e
-  quits, Mod-Ctrl-Return opens superkitty (user).
+  quits, Mod-Ctrl-Return opens a session launcher (user).
 - **M3 Layouts.** Tile (master on the right), max and float; floating, maximized,
   fullscreen, on-top and minimized windows; Mod-drag move and resize. Decided: no swap
   with master (user).

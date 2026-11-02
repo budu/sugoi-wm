@@ -64,7 +64,7 @@ each section.
   the bindings. The cost is a build tied to one libruby (0.1 plan, Risks).
 - **One meaning per chord** (user, 2026-10-31). awesome's overlaps were mistakes:
   Mod-Shift-q kills the focused window, Mod-Shift-e quits, Mod-Ctrl-Return opens
-  superkitty. Bindings never depend on whether a window has focus.
+  a session launcher. Bindings never depend on whether a window has focus.
 
 ## Layouts
 
@@ -95,7 +95,7 @@ each section.
 - **Tile, max and float only** (user, 2026-10-31). awesome's fair, bottom and top
   variants are dropped.
 - **No swap with master** (user, 2026-10-31). Swapping with the next or previous window
-  stays; Mod-Ctrl-Return goes to superkitty.
+  stays; Mod-Ctrl-Return goes to a session launcher.
 
 ## Workspaces
 

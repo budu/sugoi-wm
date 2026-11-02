@@ -11,13 +11,13 @@ everything that works today.
 |------------------------------|----------------------------------------|-----------------|
 | Mod-j, Mod-k focus by index  | `focus :previous`, `focus :next`       | M2              |
 | Mod-Shift-j, k swap by index | `swap :previous`, `swap :next`         | M2              |
-| Mod-Tab toggle-xkbmap        | `sh`; chords follow the new keymap     | M2              |
+| Mod-Tab keymap toggle        | `sh`; chords follow the new keymap     | M2              |
 | Mod-Return kitty             | `spawn "kitty"`                        | M2              |
-| Mod-Ctrl-Return superkitty   | `spawn`, the chord's only meaning      | M2, decided     |
+| Mod-Ctrl-Return launcher     | `spawn`, the chord's only meaning      | M2, decided     |
 | Mod-Ctrl-r restart           | `reload`, or `restart` for a new build | M2              |
 | Mod-Shift-q quit (with no focus) | Mod-Shift-q closes the window      | Dropped, decided |
 | Mod-Shift-e quit, dmenu confirm | dmenu, then `sugoictl quit`         | M7              |
-| Mod-y overmind restart       | `sh`                                   | M2              |
+| Mod-y dev-server restart     | `sh`                                   | M2              |
 | Mod-d, e, i, b apps          | `spawn` thunar, emacs, chromium, ...   | M2              |
 | Mod-z zeditor                | none                                   | Dropped, no Zed |
 | Mod-p menubar                | `spawn "rofi", "-show", "drun"`        | M2              |
