@@ -1,0 +1,103 @@
+/* A dark theme with sugoi's magenta (#aa007b) as its accent. Sizes are in em, so they
+ * follow the font, which follows Xft.dpi. */
+* {
+    bg:         #0f0f14;
+    bg-input:   #1a1a22;
+    bg-hover:   #2b1026;
+    fg:         #c8c8d2;
+    fg-dim:     #6e6e7e;
+    fg-bright:  #f2f2f7;
+    accent:     #aa007b;
+    background-color: transparent;
+    text-color: @fg;
+    font: "Noto Sans 13";
+}
+
+window {
+    width: 34%;
+    location: center;
+    background-color: @bg;
+    border: 2px;
+    border-color: @accent;
+    border-radius: 0.9em;
+    padding: 1.1em;
+}
+
+mainbox {
+    spacing: 0.9em;
+    children: [ inputbar, message, listview ];
+}
+
+inputbar {
+    background-color: @bg-input;
+    border-radius: 0.6em;
+    padding: 0.6em 0.9em;
+    spacing: 0.7em;
+    children: [ prompt, entry ];
+}
+
+prompt {
+    text-color: @accent;
+    markup: true;
+}
+
+entry {
+    placeholder: "Search";
+    placeholder-color: @fg-dim;
+    cursor: text;
+}
+
+message {
+    background-color: @bg-input;
+    border-radius: 0.6em;
+    padding: 0.5em 0.9em;
+}
+
+listview {
+    lines: 8;
+    columns: 1;
+    fixed-height: false;
+    scrollbar: false;
+    spacing: 0.2em;
+}
+
+element {
+    padding: 0.5em 0.9em;
+    border-radius: 0.5em;
+    spacing: 0.8em;
+}
+
+element normal.normal, element alternate.normal {
+    background-color: transparent;
+    text-color: @fg;
+}
+
+element selected.normal {
+    background-color: @bg-hover;
+    text-color: @fg-bright;
+    border: 0 0 0 3px;
+    border-color: @accent;
+}
+
+element normal.active, element alternate.active, element selected.active {
+    text-color: @accent;
+}
+
+element normal.urgent, element alternate.urgent, element selected.urgent {
+    text-color: #f7768e;
+}
+
+element-icon {
+    size: 1.5em;
+    vertical-align: 0.5;
+}
+
+element-text {
+    vertical-align: 0.5;
+    text-color: inherit;
+}
+
+error-message {
+    background-color: @bg;
+    padding: 1em;
+}

@@ -1,0 +1,15 @@
+/* rofi for sugoi: drun (Mod-p, the root's right click) and dmenu lists (superkitty).
+ * Install: ln -s ~/projects/sugoi-wm/contrib/rofi ~/.config/rofi */
+configuration {
+    modi: "drun,run,window";
+    /* rofi 2 reads no X resources: Xft.dpi, by hand. */
+    dpi: 192;
+    show-icons: true;
+    icon-theme: "Adwaita";
+    drun-display-format: "{name}";
+    display-drun: "<span font='Symbols Nerd Font Mono'></span>";
+    display-run: "<span font='Symbols Nerd Font Mono'></span>";
+    display-window: "<span font='Symbols Nerd Font Mono'></span>";
+}
+
+@theme "sugoi.rasi"

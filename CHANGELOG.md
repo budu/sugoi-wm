@@ -12,6 +12,9 @@
   claude popup lists the Claude Code sessions again, as awesome's did. See
   `doc/spec/popup.md`.
 
+- **rofi** (trial). `contrib/rofi/` themes the app launcher and dmenu lists: dark,
+  sugoi's magenta accent, rounded, a larger font at 192 DPI, app icons.
+
 ## 0.1.0 (2026-11-01)
 
 The first release: an awesome replacement for one X11 monitor, configured in Ruby. See
