@@ -49,3 +49,14 @@ identifiers in brackets. Users number workspaces 1 to 30; EWMH numbers them 0 to
   it elsewhere ([U6]); otherwise, or for an invalid one (all workspaces is
   `0xFFFFFFFF`), on the current. Firefox restores its windows' workspaces so. On
   another workspace it stays hidden, and the focus stays where it was, as [U7] says.
+- **[V11] Kept state.** sugoi keeps the rest of its state in the root's `_SUGOI_STATE`
+  property, rewritten whenever it changes: the window order ([D5]) and the focus
+  history ([F5]); which windows float, and every window's floating geometry ([W1]);
+  the minimized windows, in the order they were minimized ([W6]); the stack shares
+  ([Y3]); each workspace's layout and master width ([V3]), and the workspace before
+  the last switch ([V6]). On start, after the config loads, the windows it adopts get
+  that state back, over rules as their workspace does ([U6]); windows the state does
+  not name come after those it does, in [S2]'s order. A saved layout the config's
+  cycle lacks gives way to its first ([Y7]), and the master side stays the config's.
+  The stacking order is X's, which adoption keeps ([S2]). So a restart, or a quit then
+  a start, changes nothing on screen.

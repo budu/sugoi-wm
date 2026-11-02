@@ -14,8 +14,10 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   window manager is running on <display>".
 - **[S2] Adoption.** At startup, every child of the root that is viewable and not
   override-redirect is managed as if it had just been mapped, except that focus goes
-  to the window under the pointer if there is one. Adopted windows enter the focus
-  history ([F5]) topmost first.
+  to the window under the pointer if there is one, else to the first shown window of
+  the focus history. Adopted windows enter the focus
+  history ([F5]) topmost first, unless sugoi's kept state orders them ([V11]), and
+  keep their stacking order.
 - **[S3] Connection loss.** If the X connection closes, sugoi exits with status 1 and
   logs the cause.
 - **[S4] The root.** At startup the root window gets the arrow cursor (`left_ptr`)
