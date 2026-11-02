@@ -36,6 +36,9 @@
   key and button blocks can query `windows`, as hooks do, and every block, hook and
   request knows `current_workspace` ([H2], [H3]).
 
+- **Confirmations in rofi** (trial). Quit (Mod-Shift-e) and close (Mod-Shift-q) ask in
+  a small rofi menu with the sugoi theme, "No" first, instead of dmenu.
+
 ## 0.1.0 (2026-11-01)
 
 The first release: an awesome replacement for one X11 monitor, configured in Ruby. See
