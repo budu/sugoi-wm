@@ -1,0 +1,14 @@
+#!/bin/sh
+# Installs sugoi from this checkout: sugoi and sugoictl into ~/.cargo/bin, then, through
+# sudo, the session script, the GDM entry and the pacman hook (contrib/). Run it again
+# after pulling or switching branches; `--no-system` skips the sudo part.
+set -eu
+cd "$(dirname "$0")/.."
+cargo install --locked --path crates/sugoi
+cargo install --locked --path crates/sugoictl
+[ "${1:-}" = --no-system ] && exit 0
+sudo install -Dm755 contrib/sugoi-session /usr/local/bin/sugoi-session
+sudo install -Dm644 contrib/sugoi.desktop /usr/share/xsessions/sugoi.desktop
+sudo install -Dm644 contrib/sugoi-ruby.hook /etc/pacman.d/hooks/sugoi-ruby.hook
+printf 'install: sugoi %s, from %s\n' "$(git rev-parse --short HEAD)" \
+    "$(git branch --show-current)" >&2

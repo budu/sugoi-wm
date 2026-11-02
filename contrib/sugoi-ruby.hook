@@ -1,5 +1,5 @@
 # Warns when a Ruby upgrade may break sugoi, which links libruby.so.<major.minor>.
-# Install: sudo cp contrib/sugoi-ruby.hook /etc/pacman.d/hooks/
+# scripts/install puts it in /etc/pacman.d/hooks/.
 [Trigger]
 Operation = Upgrade
 Type = Package
