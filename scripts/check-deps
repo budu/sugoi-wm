@@ -33,4 +33,5 @@ check optional "rofi (doc/config.rb's menus)" command -v rofi
 check optional "polybar (contrib/polybar)" command -v polybar
 check optional "dunst and notify-send (config errors)" command -v notify-send
 check optional "feh (the wallpaper)" command -v feh
+check optional "Papirus icons (contrib/dunst, contrib/rofi)" test -d /usr/share/icons/Papirus-Dark
 exit $missing

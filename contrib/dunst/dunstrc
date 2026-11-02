@@ -28,10 +28,10 @@
     icon_position = left
     # Icons by name from the theme, as apps send them (notify-send -i).
     enable_recursive_icon_lookup = true
-    icon_theme = Adwaita
-    # Icons are not scaled either: 24 to 32 at 96 DPI.
-    min_icon_size = 48
-    max_icon_size = 64
+    icon_theme = "Papirus-Dark, Adwaita"
+    # Icons are not scaled either: 16 to 24 at 96 DPI.
+    min_icon_size = 32
+    max_icon_size = 48
     progress_bar_frame_width = 0
     progress_bar_corner_radius = 4
     highlight = "#aa007b"

@@ -3,7 +3,8 @@
 ## Unreleased
 
 - **dunst** (trial). `contrib/dunst/` styles notifications as the rofi theme: dark,
-  sugoi's magenta frame, rounded, under the bar, red for critical ones.
+  sugoi's magenta frame, rounded, under the bar, red for critical ones. Notifications
+  and rofi take their icons from Papirus-Dark (`papirus-icon-theme`).
 - **Ready to share** (trial). A README, CONTRIBUTING and an agent guide; an MIT
   license; a pinned toolchain; `scripts/gates`, `scripts/xephyr` (sugoi in a nested X
   server) and `scripts/check-deps`. `doc/config.rb`, polybar, rofi and the session

@@ -5,7 +5,7 @@ configuration {
     /* rofi 2 reads no X resources: set your Xft.dpi here (xrdb -query). */
     dpi: 192;
     show-icons: true;
-    icon-theme: "Adwaita";
+    icon-theme: "Papirus-Dark";
     drun-display-format: "{name}";
     display-drun: "<span font='Symbols Nerd Font Mono'></span>";
     display-run: "<span font='Symbols Nerd Font Mono'></span>";
