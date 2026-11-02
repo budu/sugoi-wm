@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The root** (trial). sugoi paints the root black unless a wallpaper is set, and
+  gives it the arrow cursor from the Xcursor theme; drags show move and resize
+  cursors. `contrib/sugoi-session` restores feh's wallpaper (`~/.fehbg`). See [S4] in
+  `doc/spec/core.md`.
+- **polybar** (trial). The bar scales its fonts with `Xft.dpi` and is 44 px high.
+
 ## 0.1.0 (2026-11-01)
 
 The first release: an awesome replacement for one X11 monitor, configured in Ruby. See

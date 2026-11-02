@@ -131,6 +131,12 @@ each section.
   each window's workspace (its session's `workspaceID`) through `_NET_WM_DESKTOP`, as
   awesome honors; sugoi honors it set before mapping, and a message sent before then
   is written as that property. A rule's `workspace:` still wins, as the user's choice.
+- **The wallpaper is the session's** (0.2 trial, user, 2026-11-01). sugoi only paints
+  the root black, and keeps a wallpaper a setter announced in `_XROOTPMAP_ID`; feh
+  sets it from the session script, as awesome's theme did (`arch.png`, scaled).
+- **Cursors from the X resources** (0.2 trial). x11rb's cursor loader reads the theme
+  and size from `Xcursor.*`, else sizes from `Xft.dpi`, as Xlib clients do; it falls
+  back to X's cursor font, so a missing theme still replaces X's cross.
 - **Requests are Ruby** (M7). One socket verb does all: actions, queries and anything
   the config can do, with the 1 s limit; the user is the socket's only client
   (0600), so it opens nothing the config does not already.

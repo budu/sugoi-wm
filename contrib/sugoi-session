@@ -9,6 +9,9 @@
 # GDM's session may not have cargo's binaries on PATH: sugoi, and sugoictl for the
 # config's confirmations.
 export PATH="$HOME/.cargo/bin:$PATH"
+# The wallpaper feh last set (`feh --bg-scale <image>` writes ~/.fehbg); sugoi keeps
+# it, and paints the root black without one.
+[ -x "$HOME/.fehbg" ] && "$HOME/.fehbg"
 dunst &
 lxpolkit &
 (sleep 1 && polybar sugoi) &
