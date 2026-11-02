@@ -45,12 +45,16 @@ the identifiers in brackets.
   workspace's window has the focus. Several blocks for one event run in config order;
   a `reload` among them ends that event's hooks.
 - **[H2] Windows.** A hook's window is read-only: `id`, `class_name`, `instance`,
-  `title`, `type`, `transient?`, `workspace` (1 to 30) and `floating?`, as they were
-  when the hook started. Its methods `float`, `tile`, `size(w, h)`, `center`, `master`,
-  `move_to(n)` and `close` act on it, like the actions of [D5]; `size` and `center`
-  float a tiled window, as the `center` action of [W7] does.
+  `title`, `type`, `transient?`, `workspace` (1 to 30), `floating?` and `minimized?`,
+  as they were when the hook started. Its methods `float`, `tile`, `size(w, h)`,
+  `center`, `master`, `move_to(n)` and `close` act on it, like the actions of [D5];
+  `size` and `center` float a tiled window, as the `center` action of [W7] does.
+  `activate` goes to its workspace, restores it if minimized, and focuses and raises
+  it, as a pager's activation does ([E8]).
 - **[H3] Queries.** `windows` returns every managed window in the window order, as
-  read-only windows; `windows(workspace: n)` only those on workspace n.
+  read-only windows; `windows(workspace: n)` only those on workspace n. Hooks, key and
+  button blocks and requests ([I2]) can query, each seeing the windows as they were
+  when it started.
 - **[H4] Running.** A hook is a block: its actions run once it returns, errors and the
   1 s limit are as for keys ([R1], [R2]). Hooks do not run for what a hook's own
   actions cause.
