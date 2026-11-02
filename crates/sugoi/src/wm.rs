@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use log::{debug, info};
+use log::{debug, info, warn};
 use rustix::event::{PollFd, PollFlags, poll};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use x11rb::connection::Connection;
@@ -84,6 +84,7 @@ x11rb::atom_manager! {
         _NET_CLOSE_WINDOW,
         _NET_WM_STRUT,
         _NET_WM_STRUT_PARTIAL,
+        _XROOTPMAP_ID,
     }
 }
 
@@ -93,6 +94,33 @@ const POINTER_ROOT: Window = 1;
 const NORMAL_STATE: u32 = 1;
 /// [F3] Buttons that focus on click; the wheel (4 and 5) is not grabbed.
 const CLICKS: [ButtonIndex; 3] = [ButtonIndex::M1, ButtonIndex::M2, ButtonIndex::M3];
+
+/// [S4] [G1] [G2] The pointer's cursors; `NONE` is X's own.
+struct Cursors {
+    normal: Cursor,
+    moving: Cursor,
+    resizing: Cursor,
+}
+
+impl Cursors {
+    /// From the Xcursor theme the X resources name, or X's cursor font; X's own,
+    /// logged, when neither loads.
+    fn load(conn: &RustConnection, screen: usize) -> Cursors {
+        let load = || -> Result<Cursors, Box<dyn std::error::Error>> {
+            let resources = x11rb::resource_manager::new_from_default(conn)?;
+            let theme = x11rb::cursor::Handle::new(conn, screen, &resources)?.reply()?;
+            Ok(Cursors {
+                normal: theme.load_cursor(conn, "left_ptr")?,
+                moving: theme.load_cursor(conn, "fleur")?,
+                resizing: theme.load_cursor(conn, "bottom_right_corner")?,
+            })
+        };
+        load().unwrap_or_else(|e| {
+            warn!("no cursors: {e}");
+            Cursors { normal: NONE, moving: NONE, resizing: NONE }
+        })
+    }
+}
 
 /// A managed window.
 struct Client {
@@ -201,6 +229,9 @@ pub struct Wm {
     /// [W6] Minimized windows, the latest last.
     minimized: Vec<Window>,
     drag: Option<Drag>,
+    cursors: Cursors,
+    /// [S4] The root's background without a wallpaper.
+    black: u32,
     /// Where the last button press was and the managed window it hit, for a drag.
     press: Option<(i16, i16, Option<Window>)>,
     /// Events read while dropping crossings ([Z1]), still to handle.
@@ -230,11 +261,28 @@ impl Wm {
 
     /// Loads the settings and adopts the windows; [`Wm::new`] without the connection.
     pub fn start(&mut self) -> Result<(), Error> {
+        self.setup_root()?;
         self.setup_ewmh()?;
         self.load()?;
         self.adopt()?;
         self.conn.flush()?;
         info!("managing {} windows", self.clients.len());
+        Ok(())
+    }
+
+    /// [S4] The arrow cursor, and a black background unless a wallpaper is set.
+    fn setup_root(&self) -> Result<(), Error> {
+        let (atom, pixmap) = (self.atoms._XROOTPMAP_ID, AtomEnum::PIXMAP);
+        let wallpaper = self.conn.get_property(false, self.root, atom, pixmap, 0, 1)?;
+        let wallpaper = wallpaper.reply().map_err(lost)?.value_len > 0;
+        let mut attributes = ChangeWindowAttributesAux::new().cursor(self.cursors.normal);
+        if !wallpaper {
+            attributes = attributes.background_pixel(self.black);
+        }
+        self.conn.change_window_attributes(self.root, &attributes)?;
+        if !wallpaper {
+            self.conn.clear_area(false, self.root, 0, 0, 0, 0)?;
+        }
         Ok(())
     }
 
@@ -269,6 +317,8 @@ impl Wm {
         let attributes = ChangeWindowAttributesAux::new().event_mask(mask);
         conn.change_window_attributes(root, &attributes)?;
         let keyboard = Keyboard::read(&conn)?;
+        let cursors = Cursors::load(&conn, screen);
+        let black = conn.setup().roots[screen].black_pixel;
 
         let (sender, commands) = mpsc::channel();
         let (wake, wake_writer) = UnixStream::pair()?;
@@ -309,6 +359,8 @@ impl Wm {
             stacked: Vec::new(),
             minimized: Vec::new(),
             drag: None,
+            cursors,
+            black,
             press: None,
             pending: VecDeque::new(),
             clients: HashMap::new(),

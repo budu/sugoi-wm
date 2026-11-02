@@ -19,6 +19,49 @@ fn s1_second_wm_exits_with_a_message() {
     assert_eq!(error.to_string(), expected);
 }
 
+/// [S4]
+#[test]
+fn s4_the_root_gets_a_black_background_and_the_arrow_cursor() {
+    let mut session = Session::without_wm();
+    // What a previous session left: a white root, without a wallpaper property.
+    let white = session.conn.setup().roots[0].white_pixel;
+    let background = ChangeWindowAttributesAux::new().background_pixel(white);
+    session.conn.change_window_attributes(session.root, &background).unwrap();
+    session.conn.clear_area(false, session.root, 0, 0, 0, 0).unwrap();
+    session.move_pointer(640, 400);
+    assert!(session.root_pixels(0, 0, 8, 8).iter().any(|&b| b != 0));
+    let x_cursor = session.cursor_image();
+    session.start_wm();
+    eventually("black", || session.root_pixels(0, 0, 8, 8).iter().all(|&b| b == 0));
+    eventually("the arrow", || session.cursor_image() != x_cursor);
+}
+
+/// [S4]
+#[test]
+fn s4_a_wallpaper_stays() {
+    let mut session = Session::without_wm();
+    let conn = &session.conn;
+    let screen = &conn.setup().roots[0];
+    let pixmap = conn.generate_id().unwrap();
+    conn.create_pixmap(screen.root_depth, pixmap, session.root, 8, 8).unwrap();
+    let gc = conn.generate_id().unwrap();
+    conn.create_gc(gc, pixmap, &CreateGCAux::new().foreground(screen.white_pixel)).unwrap();
+    conn.poly_fill_rectangle(pixmap, gc, &[Rectangle { x: 0, y: 0, width: 8, height: 8 }]).unwrap();
+    let background = ChangeWindowAttributesAux::new().background_pixmap(pixmap);
+    conn.change_window_attributes(session.root, &background).unwrap();
+    let atom = session.atom("_XROOTPMAP_ID");
+    conn.change_property32(PropMode::REPLACE, session.root, atom, AtomEnum::PIXMAP, &[pixmap])
+        .unwrap();
+    conn.clear_area(false, session.root, 0, 0, 0, 0).unwrap();
+    conn.sync().unwrap();
+    session.start_wm();
+    settle();
+    // Repainting shows the root's background as sugoi left it.
+    session.conn.clear_area(false, session.root, 0, 0, 0, 0).unwrap();
+    session.conn.sync().unwrap();
+    assert!(session.root_pixels(0, 0, 8, 8).chunks(4).all(|p| p[..3] == [255, 255, 255]));
+}
+
 /// [S2]
 #[test]
 fn s2_adopts_viewable_windows_and_focuses_the_one_under_the_pointer() {

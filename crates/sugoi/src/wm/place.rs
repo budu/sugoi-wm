@@ -317,8 +317,9 @@ impl Wm {
         // Grab first: if another client holds the pointer, nothing changes.
         let mask = EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE;
         let (root, async_) = (self.root, GrabMode::ASYNC);
+        let cursor = if resize { self.cursors.resizing } else { self.cursors.moving };
         let grab =
-            self.conn.grab_pointer(false, root, mask, async_, async_, NONE, NONE, CURRENT_TIME);
+            self.conn.grab_pointer(false, root, mask, async_, async_, NONE, cursor, CURRENT_TIME);
         if grab?.reply().map_err(lost)?.status != GrabStatus::SUCCESS {
             return Ok(());
         }

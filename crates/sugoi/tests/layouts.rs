@@ -317,6 +317,31 @@ fn g2_mod_right_drag_resizes_from_the_corner() {
     eventually("resized", || session.outer(apps[1].window) == (0, 0, 690, 750));
 }
 
+/// [G1] and [G2]
+#[test]
+fn g1_g2_drags_show_their_cursors() {
+    let session = mouse();
+    let apps = map(&session, 2);
+    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
+    let fake = |kind, detail, x, y| {
+        session.conn.xtest_fake_input(kind, detail, 0, session.root, x, y, 0).unwrap();
+        session.conn.sync().unwrap();
+    };
+    fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
+    let normal = session.cursor_image();
+    let mut seen = vec![normal.clone()];
+    for button in [1, 3] {
+        fake(KEY_PRESS_EVENT, SUPER, 0, 0);
+        fake(BUTTON_PRESS_EVENT, button, 0, 0);
+        eventually("a drag cursor", || !seen.contains(&session.cursor_image()));
+        seen.push(session.cursor_image());
+        fake(BUTTON_RELEASE_EVENT, button, 0, 0);
+        fake(KEY_RELEASE_EVENT, SUPER, 0, 0);
+        fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
+        eventually("the window's cursor again", || session.cursor_image() == normal);
+    }
+}
+
 /// [Z1]
 #[test]
 fn z1_arranging_does_not_move_the_focus() {

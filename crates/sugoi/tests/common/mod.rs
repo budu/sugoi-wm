@@ -415,6 +415,20 @@ impl Session {
         u32::from_le_bytes([data[0], data[1], data[2], 0])
     }
 
+    /// The root's pixels in a rectangle, as the server returns them.
+    pub fn root_pixels(&self, x: i16, y: i16, width: u16, height: u16) -> Vec<u8> {
+        let image = self.conn.get_image(ImageFormat::Z_PIXMAP, self.root, x, y, width, height, !0);
+        image.unwrap().reply().unwrap().data
+    }
+
+    /// The pointer's current cursor image (XFixes): its size and pixels.
+    pub fn cursor_image(&self) -> (u16, u16, Vec<u32>) {
+        use x11rb::protocol::xfixes::ConnectionExt as _;
+        self.conn.xfixes_query_version(4, 0).unwrap().reply().unwrap();
+        let image = self.conn.xfixes_get_cursor_image().unwrap().reply().unwrap();
+        (image.width, image.height, image.cursor_image)
+    }
+
     /// Whether `a` is stacked above `b`.
     pub fn above(&self, a: Window, b: Window) -> bool {
         let children = self.conn.query_tree(self.root).unwrap().reply().unwrap().children;
