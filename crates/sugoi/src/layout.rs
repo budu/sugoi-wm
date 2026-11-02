@@ -24,16 +24,17 @@ pub enum Layout {
 }
 
 impl Layout {
-    const NAMES: [(Layout, &'static str); 3] =
-        [(Layout::Tile, "tile"), (Layout::Max, "max"), (Layout::Float, "float")];
-
     /// [Y7] The name the config and the kept state ([V11]) use.
     pub fn name(self) -> &'static str {
-        Layout::NAMES.iter().find(|(l, _)| *l == self).map_or("tile", |(_, n)| n)
+        match self {
+            Layout::Tile => "tile",
+            Layout::Max => "max",
+            Layout::Float => "float",
+        }
     }
 
     pub fn from_name(name: &str) -> Option<Layout> {
-        Layout::NAMES.iter().find(|(_, n)| *n == name).map(|(l, _)| *l)
+        [Layout::Tile, Layout::Max, Layout::Float].into_iter().find(|l| l.name() == name)
     }
 }
 

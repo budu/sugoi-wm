@@ -12,7 +12,7 @@ client of its own. Tests cite the identifiers in brackets.
 - **[O2] Place.** The popup is override-redirect, so sugoi does not manage it ([M2]).
   Its top is 5 px (scaled) below the work area's (`_NET_WORKAREA`, else the screen's
   top), and it is centered on the pointer, kept on screen. It is no larger than the
-  screen below that top: what does not fit is cut, inside its border.
+  work area below that top: what does not fit is cut, inside its border.
 - **[O3] Close.** It holds the pointer and the keyboard while it shows: a button press
   anywhere or any key closes it, and goes nowhere else, so clicking the widget again
   closes it. It exits 0 then. If it cannot hold them within 1 s (another client does),

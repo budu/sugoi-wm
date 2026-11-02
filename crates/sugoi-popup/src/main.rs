@@ -49,19 +49,31 @@ fn run() -> Result<ExitCode, Error> {
     let resources = x11rb::resource_manager::new_from_default(&conn)?;
     let dpi = resources.get_value::<f64>("Xft.dpi", "").ok().flatten().unwrap_or(96.0);
     let scale = dpi / 96.0;
-    // [O1] The pixels go out as cairo's RGB24: 32 bits a pixel, least significant first.
+    // [O1] The pixels go out as cairo's RGB24: 32 bits a pixel, least significant first,
+    // red in the high byte.
     let rgb24 = conn.setup().pixmap_formats.iter().any(|f| f.depth == 24 && f.bits_per_pixel == 32);
-    if screen.root_depth != 24 || !rgb24 || conn.setup().image_byte_order != ImageOrder::LSB_FIRST {
+    let visual = screen
+        .allowed_depths
+        .iter()
+        .flat_map(|d| &d.visuals)
+        .find(|v| v.visual_id == screen.root_visual);
+    let true_color = visual.is_some_and(|v| {
+        v.class == VisualClass::TRUE_COLOR
+            && (v.red_mask, v.green_mask, v.blue_mask) == (0xff0000, 0xff00, 0xff)
+    });
+    let lsb = conn.setup().image_byte_order == ImageOrder::LSB_FIRST;
+    if screen.root_depth != 24 || !rgb24 || !true_color || !lsb {
         eprintln!("sugoi-popup: needs a 24-bit TrueColor screen");
         return Ok(ExitCode::FAILURE);
     }
 
-    // [O2] Under the pointer, below the work area's top, within the screen.
+    // [O2] Under the pointer, below the work area's top, within it.
     let pointer = conn.query_pointer(screen.root)?.reply()?;
-    let top = work_area_top(&conn, screen.root)?;
+    let screen_height = i32::from(screen.height_in_pixels);
+    let (top, bottom) = work_area(&conn, screen.root)?.unwrap_or((0, screen_height));
     let y = top + (GAP * scale).round() as i32;
     let screen_width = i32::from(screen.width_in_pixels);
-    let room = (screen_width, (i32::from(screen.height_in_pixels) - y).max(1));
+    let room = (screen_width, (bottom - y).max(1));
     let image = render(markup, dpi, scale, room)?;
     let (width, height) = (image.width as i32, image.height as i32);
     let x = (i32::from(pointer.root_x) - width / 2).clamp(0, (screen_width - width).max(0));
@@ -163,12 +175,15 @@ fn render(markup: &str, dpi: f64, scale: f64, room: (i32, i32)) -> Result<Image,
     Ok(Image { width: width as u32, height: height as u32, stride, data })
 }
 
-/// [O2] The work area's top, as sugoi publishes it, or the screen's.
-fn work_area_top(conn: &RustConnection, root: Window) -> Result<i32, Error> {
+/// [O2] The work area's top and bottom, as sugoi publishes it.
+fn work_area(conn: &RustConnection, root: Window) -> Result<Option<(i32, i32)>, Error> {
     let atom = conn.intern_atom(false, b"_NET_WORKAREA")?.reply()?.atom;
     let reply = conn.get_property(false, root, atom, AtomEnum::CARDINAL, 0, 4)?.reply()?;
-    let y = reply.value32().and_then(|mut v| v.nth(1));
-    Ok(y.map_or(0, |y| y as i32))
+    let area: Vec<u32> = reply.value32().map(|v| v.collect()).unwrap_or_default();
+    Ok(match area[..] {
+        [_, y, _, height] => Some((y as i32, (y + height) as i32)),
+        _ => None,
+    })
 }
 
 /// [O3] Takes the pointer and the keyboard, retrying while another client holds them

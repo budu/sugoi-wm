@@ -220,6 +220,23 @@ fn o2_a_long_popup_is_cut_to_the_screen() {
     assert!(exit(&mut child).success());
 }
 
+/// [O2]
+#[test]
+fn o2_a_long_popup_stops_above_a_bottom_bar() {
+    let x = xvfb(96);
+    let atom = x.conn.intern_atom(false, b"_NET_WORKAREA").unwrap().reply().unwrap().atom;
+    let area = [0, TOP as u32, SCREEN.0 as u32, (SCREEN.1 - TOP - 30) as u32];
+    x.conn.change_property32(PropMode::REPLACE, x.root, atom, AtomEnum::CARDINAL, &area).unwrap();
+    x.conn.sync().unwrap();
+    x.pointer(600, 10);
+    let mut child = x.run(&"a line of text\n".repeat(400));
+    let (_, py, _, height) = x.shown();
+    assert_eq!(py + height, SCREEN.1 - 30);
+    x.fake(KEY_PRESS_EVENT, 9);
+    x.fake(KEY_RELEASE_EVENT, 9);
+    assert!(exit(&mut child).success());
+}
+
 /// [O3]
 #[test]
 fn o3_the_closing_click_goes_nowhere_else() {

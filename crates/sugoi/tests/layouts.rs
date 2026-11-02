@@ -5,7 +5,7 @@ mod common;
 
 use common::keycode::SUPER;
 use common::*;
-use sugoi::{Binding, Choice, Command, Layout, Master, Settings, Side, State};
+use sugoi::{Binding, Choice, Command, Direction, Layout, Master, Settings, Side, State};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -343,6 +343,26 @@ fn g1_a_swap_keeps_the_cells_so_it_does_not_swap_back() {
     assert_eq!(session.outer(apps[1].window), (0, 160, 640, 640));
     assert_eq!(session.outer(apps[2].window), (0, 0, 640, 160));
     release(&session, 1);
+}
+
+/// [D5] A tiled window swapped with a floating one keeps its share.
+#[test]
+fn d5_a_swap_with_a_floating_window_keeps_the_shares() {
+    let session = tiling();
+    let apps = map(&session, 4);
+    // c gets a large share, then floats with it.
+    session.click(100, 400);
+    eventually("c focused", || session.focus() == apps[2].window);
+    send(&session, Command::WindowHeight(0.3));
+    send(&session, Command::Center(Some(0.3)));
+    eventually("b and d share the stack", || session.outer(apps[1].window) == (0, 0, 640, 400));
+    // b's neighbor in the order is c, floating.
+    session.click(100, 100);
+    eventually("b focused", || session.focus() == apps[1].window);
+    send(&session, Command::Swap(Direction::Next));
+    settle();
+    assert_eq!(session.outer(apps[1].window), (0, 0, 640, 400));
+    assert_eq!(session.outer(apps[3].window), (0, 400, 640, 400));
 }
 
 /// [G1]

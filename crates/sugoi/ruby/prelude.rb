@@ -254,7 +254,6 @@ module Sugoi
     # [R1] [R2] [H3] Runs key or button block `index`, seeing the managed windows and
     # the current workspace: its commands, or an error message.
     def run(index, windows, current)
-      @queue = []
       see(windows, current)
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call }
       @queue
@@ -267,7 +266,6 @@ module Sugoi
     # [H1] [H4] Runs hook block `index` with a window or a workspace number, and the
     # managed windows: its commands, or an error message.
     def run_hook(index, window, workspace, windows, current)
-      @queue = []
       see(windows, current)
       argument = window ? Window.new(*window) : workspace
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call(argument) }
@@ -281,7 +279,6 @@ module Sugoi
     # [I2] Runs a request from sugoictl: [its value, inspected, and its commands], or an
     # error message.
     def eval_request(code, windows, current)
-      @queue = []
       see(windows, current)
       # `inspect` is user code too: within the limit.
       inspected = Timeout.timeout(TIME_LIMIT) { Request.new.run(code).inspect }
@@ -300,6 +297,7 @@ module Sugoi
 
     # [H3] What a block, hook or request sees while it runs, and forgets after.
     def see(windows, current)
+      @queue = []
       @windows = windows.map { |w| Window.new(*w) }.freeze
       @current_workspace = current
     end

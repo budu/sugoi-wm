@@ -50,6 +50,19 @@ struct KeptWindow {
     process: Option<(Option<u32>, Option<u64>)>,
 }
 
+/// [V11] Whether a window is the one its line was saved for: the same process, known on
+/// both sides; a line from before processes were saved names its window as is.
+fn same_process(
+    saved: Option<(Option<u32>, Option<u64>)>,
+    now: (Option<u32>, Option<u64>),
+) -> bool {
+    match saved {
+        None => true,
+        Some((Some(pid), Some(start))) => now == (Some(pid), Some(start)),
+        Some(_) => false,
+    }
+}
+
 /// A number, or `-` for none.
 fn optional<T: std::str::FromStr>(text: &str) -> Option<Option<T>> {
     if text == "-" { Some(None) } else { text.parse().ok().map(Some) }
@@ -185,9 +198,9 @@ impl Wm {
             .windows
             .iter()
             .filter(|(window, k)| {
-                self.clients.get(window).is_some_and(|c| {
-                    k.process.is_none_or(|process| process == (c.info.pid, c.started))
-                })
+                self.clients
+                    .get(window)
+                    .is_some_and(|c| same_process(k.process, (c.info.pid, c.started)))
             })
             .map(|(&window, _)| window)
             .collect();
@@ -208,14 +221,10 @@ impl Wm {
         }
         // Windows the state names, once each, in its order; the others after, as adopted.
         let reorder = |list: &mut Vec<Window>, saved: &[Window]| {
-            let mut ordered: Vec<Window> = Vec::new();
-            for &window in saved.iter().filter(|w| known.contains(w)) {
-                if !ordered.contains(&window) {
-                    ordered.push(window);
-                }
-            }
-            let rest: Vec<Window> = list.iter().copied().filter(|w| !ordered.contains(w)).collect();
-            ordered.extend(rest);
+            let mut seen = HashSet::new();
+            let mut ordered: Vec<Window> =
+                saved.iter().copied().filter(|w| known.contains(w) && seen.insert(*w)).collect();
+            ordered.extend(list.iter().copied().filter(|w| !seen.contains(w)));
             *list = ordered;
         };
         reorder(&mut self.order, &kept.order);
@@ -251,6 +260,16 @@ mod tests {
         assert_eq!(kept.windows[&0x10].process, Some((Some(5151), Some(81971))));
         assert_eq!(kept.windows[&0x20].process, Some((None, None)));
         assert!(!kept.windows.contains_key(&0x30));
+    }
+
+    #[test]
+    fn only_a_known_and_equal_process_is_the_same() {
+        let now = (Some(5151), Some(81971));
+        assert!(same_process(Some(now), now));
+        assert!(same_process(None, now));
+        assert!(!same_process(Some((Some(5151), Some(1))), now));
+        assert!(!same_process(Some((None, None)), (None, None)));
+        assert!(!same_process(Some((Some(5151), None)), (Some(5151), None)));
     }
 
     #[test]
