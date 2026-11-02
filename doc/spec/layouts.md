@@ -62,13 +62,23 @@ workspace; until then there is one of each.
 ## Mouse
 
 - **[G1] Move.** `move` in a button block starts dragging the clicked window, even one
-  that cannot take the focus: it follows the pointer until the button is released. A
-  tiled, maximized or fullscreen window starts floating where it shows. The pointer
-  shows the move cursor (`fleur`) meanwhile.
-- **[G2] Resize.** `resize` in a button block resizes the clicked window from its
-  bottom-right corner, where the pointer is moved, until the button is released, to at
-  least 1 px. A tiled window starts floating. The pointer shows the corner cursor
-  (`bottom_right_corner`) meanwhile.
+  that cannot take the focus, until the button is released. A floating window follows
+  the pointer, and a maximized or fullscreen one starts floating where it shows. A
+  tiled window stays in the layout: in tile, it trades places in the window order
+  ([D5]) with each tiled window the pointer enters, as `swap` does, as awesome's tiled
+  move does. The pointer shows the move cursor (`fleur`) meanwhile.
+- **[G2] Resize.** `resize` in a button block resizes the clicked floating window from
+  its corner nearest the pointer, where the pointer is moved, until the button is
+  released; the opposite corner stays, and the window keeps at least 1 px. A maximized
+  or fullscreen window starts floating. The pointer shows that corner's cursor
+  (`top_left_corner` and so on) meanwhile.
+- **[G3] Resizing the layout.** In tile, `resize` on a tiled window moves the pointer to
+  the edge between the columns, at the window's bottom edge (its top edge if it is the
+  last of its column, its middle if it is alone there), and the drag resizes the
+  layout, as awesome's tile does: the pointer's x sets the master width, within
+  [Y4]'s bounds, and its y moves that edge of the window, the other windows of its
+  column sharing the rest in proportion, within [Y3]'s bounds. The window stays tiled;
+  the pointer shows `cross`. In max, `resize` and `move` do nothing to a tiled window.
 
 ## Focus
 
