@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Memory in the bar** (trial). `contrib/polybar` shows the memory in use, as a
+  percentage, beside the CPU.
 - **Units in status modules** (trial). `contrib/polybar/status <icon> --unit % …` shows
   a percentage with its sign, colored with the number, as awesome's widgets did.
 - **dunst** (trial). `contrib/dunst/` styles notifications as the rofi theme: dark,
