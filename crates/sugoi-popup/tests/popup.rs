@@ -237,6 +237,44 @@ fn o2_a_long_popup_stops_above_a_bottom_bar() {
     assert!(exit(&mut child).success());
 }
 
+/// [O2] A stale or absurd work area still keeps the popup on screen.
+#[test]
+fn o2_a_work_area_past_the_screen_is_kept_to_it() {
+    for area in [[0, 0, SCREEN.0 as u32, 1440], [0, 4_000_000_000, 7, 400_000_000]] {
+        let x = xvfb(96);
+        let atom = x.conn.intern_atom(false, b"_NET_WORKAREA").unwrap().reply().unwrap().atom;
+        x.conn
+            .change_property32(PropMode::REPLACE, x.root, atom, AtomEnum::CARDINAL, &area)
+            .unwrap();
+        x.conn.sync().unwrap();
+        x.pointer(600, 10);
+        let mut child = x.run(&"a line of text\n".repeat(400));
+        let (px, py, width, height) = x.shown();
+        assert!(px >= 0 && py >= 0, "{area:?}");
+        assert!(px + width <= SCREEN.0 && py + height <= SCREEN.1, "{area:?}");
+        x.fake(KEY_PRESS_EVENT, 9);
+        x.fake(KEY_RELEASE_EVENT, 9);
+        assert!(exit(&mut child).success());
+    }
+}
+
+/// [O2]
+#[test]
+fn o2_a_popup_stays_right_of_a_side_bar() {
+    let x = xvfb(96);
+    let atom = x.conn.intern_atom(false, b"_NET_WORKAREA").unwrap().reply().unwrap().atom;
+    let area = [40, TOP as u32, SCREEN.0 as u32 - 40, (SCREEN.1 - TOP) as u32];
+    x.conn.change_property32(PropMode::REPLACE, x.root, atom, AtomEnum::CARDINAL, &area).unwrap();
+    x.conn.sync().unwrap();
+    x.pointer(10, 10);
+    let mut child = x.run("hello\n");
+    let (px, _, _, _) = x.shown();
+    assert_eq!(px, 40);
+    x.fake(KEY_PRESS_EVENT, 9);
+    x.fake(KEY_RELEASE_EVENT, 9);
+    assert!(exit(&mut child).success());
+}
+
 /// [O3]
 #[test]
 fn o3_the_closing_click_goes_nowhere_else() {

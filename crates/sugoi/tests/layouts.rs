@@ -365,6 +365,23 @@ fn d5_a_swap_with_a_floating_window_keeps_the_shares() {
     assert_eq!(session.outer(apps[3].window), (0, 400, 640, 400));
 }
 
+/// [D5] A swap in the float layout keeps the cells for when it tiles again.
+#[test]
+fn d5_a_swap_in_the_float_layout_trades_shares() {
+    let layouts = vec![Layout::Tile, Layout::Float];
+    let session = Session::with_settings(Settings { layouts, ..Settings::default() });
+    let apps = map(&session, 3);
+    session.click(100, 100);
+    eventually("b focused", || session.focus() == apps[1].window);
+    send(&session, Command::WindowHeight(0.3));
+    eventually("b large", || session.outer(apps[1].window) == (0, 0, 640, 640));
+    send(&session, Command::Layout(Choice::Next));
+    send(&session, Command::Swap(Direction::Next));
+    send(&session, Command::Layout(Choice::Next));
+    eventually("c takes b's cell", || session.outer(apps[2].window) == (0, 0, 640, 640));
+    assert_eq!(session.outer(apps[1].window), (0, 640, 640, 160));
+}
+
 /// [G1]
 #[test]
 fn g1_move_drags_the_clicked_window_even_if_it_cannot_take_the_focus() {

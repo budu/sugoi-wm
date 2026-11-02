@@ -473,14 +473,19 @@ impl Wm {
         self.swap_windows(window, other)
     }
 
-    /// [D5] [G1] Two windows trade places in the window order; two tiled ones trade
+    /// [D5] [G1] Two windows trade places in the window order; two in the layout trade
     /// their shares too, so the cells stay where they were.
     pub(super) fn swap_windows(&mut self, a: Window, b: Window) -> Result<(), Error> {
         let i = self.order.iter().position(|&w| w == a);
         let j = self.order.iter().position(|&w| w == b);
         let (Some(i), Some(j)) = (i, j) else { return Ok(()) };
         self.order.swap(i, j);
-        if self.tiled(a) && self.tiled(b) {
+        // In the layout by their own state, whatever the workspace's layout.
+        let laid_out = |w: &Window| {
+            let c = &self.clients[w];
+            !(c.floating || c.maximized || c.fullscreen || c.minimized)
+        };
+        if laid_out(&a) && laid_out(&b) {
             let share = self.clients[&a].share;
             let client = self.clients.get_mut(&b).expect("managed");
             let other = std::mem::replace(&mut client.share, share);

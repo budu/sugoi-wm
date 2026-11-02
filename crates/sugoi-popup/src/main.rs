@@ -69,14 +69,14 @@ fn run() -> Result<ExitCode, Error> {
 
     // [O2] Under the pointer, below the work area's top, within it.
     let pointer = conn.query_pointer(screen.root)?.reply()?;
-    let screen_height = i32::from(screen.height_in_pixels);
-    let (top, bottom) = work_area(&conn, screen.root)?.unwrap_or((0, screen_height));
-    let y = top + (GAP * scale).round() as i32;
-    let screen_width = i32::from(screen.width_in_pixels);
-    let room = (screen_width, (bottom - y).max(1));
+    let size = (i32::from(screen.width_in_pixels), i32::from(screen.height_in_pixels));
+    let area = work_area(&conn, screen.root, size)?;
+    let y = (area.y + (GAP * scale).round() as i32).min(area.y + area.height - 1);
+    let room = (area.width.max(1), (area.y + area.height - y).max(1));
     let image = render(markup, dpi, scale, room)?;
     let (width, height) = (image.width as i32, image.height as i32);
-    let x = (i32::from(pointer.root_x) - width / 2).clamp(0, (screen_width - width).max(0));
+    let right = area.x + area.width - width;
+    let x = (i32::from(pointer.root_x) - width / 2).clamp(area.x, right.max(area.x));
 
     let window = conn.generate_id()?;
     let aux = CreateWindowAux::new()
@@ -175,15 +175,29 @@ fn render(markup: &str, dpi: f64, scale: f64, room: (i32, i32)) -> Result<Image,
     Ok(Image { width: width as u32, height: height as u32, stride, data })
 }
 
-/// [O2] The work area's top and bottom, as sugoi publishes it.
-fn work_area(conn: &RustConnection, root: Window) -> Result<Option<(i32, i32)>, Error> {
+/// [O2] Where a popup may go.
+struct Area {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+/// [O2] The work area as sugoi publishes it, kept within the screen (another client may
+/// have left any numbers); the screen without one. Two values give its top only.
+fn work_area(conn: &RustConnection, root: Window, screen: (i32, i32)) -> Result<Area, Error> {
     let atom = conn.intern_atom(false, b"_NET_WORKAREA")?.reply()?.atom;
     let reply = conn.get_property(false, root, atom, AtomEnum::CARDINAL, 0, 4)?.reply()?;
-    let area: Vec<u32> = reply.value32().map(|v| v.collect()).unwrap_or_default();
-    Ok(match area[..] {
-        [_, y, _, height] => Some((y as i32, (y + height) as i32)),
-        _ => None,
-    })
+    let values: Vec<i64> = reply.value32().map(|v| v.map(i64::from).collect()).unwrap_or_default();
+    let (width, height) = (i64::from(screen.0), i64::from(screen.1));
+    let (x, y, w, h) = match values[..] {
+        [x, y, w, h] => (x, y, w, h),
+        [x, y, ..] => (x, y, width - x, height - y),
+        _ => (0, 0, width, height),
+    };
+    let (x, y) = (x.clamp(0, width - 1), y.clamp(0, height - 1));
+    let (w, h) = (w.clamp(1, width - x), h.clamp(1, height - y));
+    Ok(Area { x: x as i32, y: y as i32, width: w as i32, height: h as i32 })
 }
 
 /// [O3] Takes the pointer and the keyboard, retrying while another client holds them

@@ -70,15 +70,34 @@ property run passed 237 of 237 at scale 20 in 1 min 50 s on `kept-state`.
 
 ## Process
 
-- **No review round** ran on the trial fixes; each has contract cases, and mutations
-  that fail them, but no `/code-review`. Judgment (agent): one review of the trial's
-  diff (`v0.1.0..main`) before the 0.2 plan closes the gap cheaply.
+- **Review.** `/code-review high` on the trial's diff (`v0.1.0..main`), then on the
+  fixes, then a third round on the re-review's fixes, as one of them was a regression.
+
+  | Round     | Findings | Fixed | Declined | Commit    |
+  |-----------|---------:|------:|---------:|-----------|
+  | Review    |       10 |     8 |        2 | `e00ce91` |
+  | Re-review |        8 |     7 |        1 | `d760f1f` |
+  | Third     |        9 |     7 |        2 | (below)   |
+
+  What mattered: a tiled swap by mouse could flip back on every motion (shares stayed
+  with the windows); the kept state was rewritten at the pointer's rate during drags,
+  and could be inherited by a new window reusing an ID; the popup had no size bound.
+  Declined: `activate` in a manage hook (one debug-logged X error, then [F1] focuses
+  the window), a lazy view for key blocks (a request building the same view takes
+  0.70 ms with 34 windows), saving during a drag, and a check that the layout names
+  cover every layout (Rust cannot enforce it). The reviews disagreed on windows whose
+  process is unknown; restarts won: they are matched by ID alone. Each fix has a case,
+  and a mutation of each fails it.
 - **Two slips, both caught.** A test cleanup (`pkill -f "rofi -dmenu"`) closed the
   user's open superkitty menu; cleanups now stop their own processes by PID. The
   `kept-state` commits first landed on `main`; they moved to their branch before any
   merge, and nothing was pushed.
 
 ## Open for the 0.2 plan
+
+- **`swap` with a floating neighbor** changes the order only, so nothing moves on
+  screen; the neighbor rule should skip windows the layout does not place (third
+  review round, pre-existing).
 
 - **Ruby widgets.** A bar of sugoi's own, in Ruby (ruby-gnome), rather than polybar
   scripts; `sugoi-popup` would be its first piece (user, to decide).

@@ -50,17 +50,14 @@ struct KeptWindow {
     process: Option<(Option<u32>, Option<u64>)>,
 }
 
-/// [V11] Whether a window is the one its line was saved for: the same process, known on
-/// both sides; a line from before processes were saved names its window as is.
+/// [V11] Whether a window is the one its line was saved for: the same process, or both
+/// unknown; a line from before processes were saved names its window as is.
 fn same_process(
     saved: Option<(Option<u32>, Option<u64>)>,
     now: (Option<u32>, Option<u64>),
 ) -> bool {
-    match saved {
-        None => true,
-        Some((Some(pid), Some(start))) => now == (Some(pid), Some(start)),
-        Some(_) => false,
-    }
+    // An unknown process (a remote client) cannot tell: the ID alone decides.
+    saved.is_none_or(|saved| saved == now)
 }
 
 /// A number, or `-` for none.
@@ -268,8 +265,8 @@ mod tests {
         assert!(same_process(Some(now), now));
         assert!(same_process(None, now));
         assert!(!same_process(Some((Some(5151), Some(1))), now));
-        assert!(!same_process(Some((None, None)), (None, None)));
-        assert!(!same_process(Some((Some(5151), None)), (Some(5151), None)));
+        assert!(same_process(Some((None, None)), (None, None)));
+        assert!(!same_process(Some((None, None)), now));
     }
 
     #[test]
