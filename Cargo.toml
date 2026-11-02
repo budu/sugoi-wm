@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/sugoi", "crates/sugoictl"]
+members = ["crates/sugoi", "crates/sugoi-popup", "crates/sugoictl"]
 
 [workspace.package]
 version = "0.1.0"
