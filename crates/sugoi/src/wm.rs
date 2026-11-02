@@ -34,7 +34,7 @@ use crate::layout::{Layout, Master, Rect};
 use crate::spawn::{notify, spawn};
 use crate::{
     Action, Border, Command, Direction, Error, Event as HookEvent, Handle, HookArg, Info, Rule,
-    Script, Settings, Snapshot, WindowType,
+    Script, Settings, WindowType,
 };
 use desks::Desk;
 use place::Drag;
@@ -550,8 +550,8 @@ impl Wm {
             Action::Commands(commands) => commands,
             Action::Script(block) => {
                 // [H3] The block sees the windows as they are now.
-                let windows: Vec<Snapshot> = self.order.iter().map(|&w| self.snapshot(w)).collect();
-                match self.script.run(block, &windows) {
+                let view = self.view();
+                match self.script.run(block, &view) {
                     Ok(commands) => commands,
                     Err(message) => {
                         report(&message);

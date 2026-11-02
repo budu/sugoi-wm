@@ -376,24 +376,22 @@ pub trait Script {
     fn commit(&mut self) {}
     /// [R1] and [R2] Runs a key or button block with the managed windows ([H3]); an
     /// error message means none of its commands run.
-    fn run(&mut self, block: usize, windows: &[Snapshot]) -> Result<Vec<Command>, String>;
+    fn run(&mut self, block: usize, view: &View) -> Result<Vec<Command>, String>;
     /// [H1] to [H4] Runs a hook's block with its argument and the managed windows.
-    fn hook(
-        &mut self,
-        block: usize,
-        _arg: &HookArg,
-        _windows: &[Snapshot],
-    ) -> Result<Vec<Command>, String> {
+    fn hook(&mut self, block: usize, _arg: &HookArg, _view: &View) -> Result<Vec<Command>, String> {
         Err(format!("no hook block {block}"))
     }
     /// [I2] Runs a request's Ruby: its value as `inspect` gives it, and its commands.
-    fn eval(
-        &mut self,
-        _code: &str,
-        _windows: &[Snapshot],
-    ) -> Result<(String, Vec<Command>), String> {
+    fn eval(&mut self, _code: &str, _view: &View) -> Result<(String, Vec<Command>), String> {
         Err("this sugoi runs without Ruby".into())
     }
+}
+
+/// [H3] What a block, hook or request sees: the managed windows in the window order, and
+/// the current workspace (1 to 30).
+pub struct View {
+    pub windows: Vec<Snapshot>,
+    pub workspace: u32,
 }
 
 /// [L3] The built-in settings, without Ruby.
@@ -404,7 +402,7 @@ impl Script for Defaults {
         Ok(Settings::default())
     }
 
-    fn run(&mut self, block: usize, _windows: &[Snapshot]) -> Result<Vec<Command>, String> {
+    fn run(&mut self, block: usize, _view: &View) -> Result<Vec<Command>, String> {
         Err(format!("the defaults have no block {block}"))
     }
 }

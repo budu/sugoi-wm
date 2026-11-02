@@ -7,7 +7,7 @@ use x11rb::protocol::xproto::*;
 
 use super::{Wm, vanished};
 use crate::layout;
-use crate::{Effects, Error, Event, HookArg, Info, Snapshot, WindowCommand, WindowType};
+use crate::{Effects, Error, Event, HookArg, Info, Snapshot, View, WindowCommand, WindowType};
 
 /// The property cookies of [U1], sent before any reply is read.
 pub(super) struct InfoCookies<'c> {
@@ -190,6 +190,12 @@ impl Wm {
         Ok(())
     }
 
+    /// [H3] The windows and the workspace, as a block, hook or request sees them now.
+    pub(super) fn view(&self) -> View {
+        let windows = self.order.iter().map(|&w| self.snapshot(w)).collect();
+        View { windows, workspace: self.current as u32 + 1 }
+    }
+
     /// [H2]
     pub(super) fn snapshot(&self, window: Window) -> Snapshot {
         let c = &self.clients[&window];
@@ -259,7 +265,7 @@ impl Wm {
         if blocks.is_empty() {
             return Ok(());
         }
-        let windows: Vec<Snapshot> = self.order.iter().map(|&w| self.snapshot(w)).collect();
+        let view = self.view();
         self.in_hook = true;
         let loads = self.loads;
         let mut result = Ok(());
@@ -268,7 +274,7 @@ impl Wm {
             if self.loads != loads {
                 break;
             }
-            match self.script.hook(block, &arg, &windows) {
+            match self.script.hook(block, &arg, &view) {
                 Ok(commands) => {
                     for command in commands {
                         result = self.execute(command);

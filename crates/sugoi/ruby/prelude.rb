@@ -76,7 +76,10 @@ module Sugoi
     # [V8]
     def move_to(n) = Sugoi.queue("move_to", Sugoi.workspace(n).to_s)
 
-    # [H3] The managed windows, in the window order; only in a hook.
+    # [H3] The current workspace, 1 to 30.
+    def current_workspace = Sugoi.current_workspace
+
+    # [H3] The managed windows, in the window order.
     def windows(workspace: nil)
       return Sugoi.windows if workspace.nil?
 
@@ -248,11 +251,11 @@ module Sugoi
       nil
     end
 
-    # [R1] [R2] Runs block `index`: its commands, or an error message.
-    # [R1] [H3] Runs key or button block `index`, with the managed windows.
-    def run(index, windows)
+    # [R1] [R2] [H3] Runs key or button block `index`, seeing the managed windows and
+    # the current workspace: its commands, or an error message.
+    def run(index, windows, current)
       @queue = []
-      @windows = windows.map { |w| Window.new(*w) }.freeze
+      see(windows, current)
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call }
       @queue
     rescue ScriptError, StandardError => e
@@ -260,13 +263,14 @@ module Sugoi
     ensure
       @queue = nil
       @windows = nil
+      @current_workspace = nil
     end
 
     # [H1] [H4] Runs hook block `index` with a window or a workspace number, and the
     # managed windows: its commands, or an error message.
-    def run_hook(index, window, workspace, windows)
+    def run_hook(index, window, workspace, windows, current)
       @queue = []
-      @windows = windows.map { |w| Window.new(*w) }.freeze
+      see(windows, current)
       argument = window ? Window.new(*window) : workspace
       Timeout.timeout(TIME_LIMIT) { @current.blocks.fetch(index).call(argument) }
       @queue
@@ -275,13 +279,14 @@ module Sugoi
     ensure
       @queue = nil
       @windows = nil
+      @current_workspace = nil
     end
 
     # [I2] Runs a request from sugoictl: [its value, inspected, and its commands], or an
     # error message.
-    def eval_request(code, windows)
+    def eval_request(code, windows, current)
       @queue = []
-      @windows = windows.map { |w| Window.new(*w) }.freeze
+      see(windows, current)
       # `inspect` is user code too: within the limit.
       inspected = Timeout.timeout(TIME_LIMIT) { Request.new.run(code).inspect }
       [inspected, @queue]
@@ -290,9 +295,20 @@ module Sugoi
     ensure
       @queue = nil
       @windows = nil
+      @current_workspace = nil
     end
 
     def windows = @windows || raise("windows are only known in a block or a request")
+
+    def current_workspace
+      @current_workspace || raise("the workspace is only known in a block or a request")
+    end
+
+    # [H3] What a block, hook or request sees while it runs.
+    def see(windows, current)
+      @windows = windows.map { |w| Window.new(*w) }.freeze
+      @current_workspace = current
+    end
 
     def queue(*command)
       raise "actions only run inside a key or button block" unless @queue

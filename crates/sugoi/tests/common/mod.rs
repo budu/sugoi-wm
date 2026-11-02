@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use sugoi::{Command, Error, Handle, Layout, Script, Settings, Snapshot, Wm};
+use sugoi::{Command, Error, Handle, Layout, Script, Settings, View, Wm};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -83,7 +83,7 @@ impl Script for Fixed {
         Ok(self.0.clone())
     }
 
-    fn run(&mut self, block: usize, _windows: &[Snapshot]) -> Result<Vec<Command>, String> {
+    fn run(&mut self, block: usize, _view: &View) -> Result<Vec<Command>, String> {
         Err(format!("no block {block}"))
     }
 }

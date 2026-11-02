@@ -52,9 +52,10 @@ the identifiers in brackets.
   `activate` goes to its workspace, restores it if minimized, and focuses and raises
   it, as a pager's activation does ([E8]).
 - **[H3] Queries.** `windows` returns every managed window in the window order, as
-  read-only windows; `windows(workspace: n)` only those on workspace n. Hooks, key and
-  button blocks and requests ([I2]) can query, each seeing the windows as they were
-  when it started.
+  read-only windows; `windows(workspace: n)` only those on workspace n;
+  `current_workspace` the current workspace (1 to 30). Hooks, key and button blocks
+  and requests ([I2]) can query, each seeing the windows and the workspace as they
+  were when it started.
 - **[H4] Running.** A hook is a block: its actions run once it returns, errors and the
   1 s limit are as for keys ([R1], [R2]). Hooks do not run for what a hook's own
   actions cause.

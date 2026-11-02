@@ -8,7 +8,8 @@ use magnus::{ArgList, RModule, RString, Ruby, TryConvert, Value};
 
 use crate::{
     Binding, Border, Choice, Command, Direction, Effects, Event, Goto, HookArg, Layout, Limits,
-    Master, Matcher, Rule, Script, Settings, Side, Snapshot, State, WindowCommand, WindowType,
+    Master, Matcher, Rule, Script, Settings, Side, Snapshot, State, View, WindowCommand,
+    WindowType,
 };
 
 pub struct RubyScript {
@@ -173,9 +174,9 @@ impl Script for RubyScript {
         }
     }
 
-    fn run(&mut self, block: usize, windows: &[Snapshot]) -> Result<Vec<Command>, String> {
-        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
-        let value: Value = self.call("run", (block, windows))?;
+    fn run(&mut self, block: usize, view: &View) -> Result<Vec<Command>, String> {
+        let windows: Vec<WindowExport> = view.windows.iter().map(window_export).collect();
+        let value: Value = self.call("run", (block, windows, view.workspace))?;
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
@@ -183,9 +184,9 @@ impl Script for RubyScript {
         commands.iter().map(|c| command(c)).collect()
     }
 
-    fn eval(&mut self, code: &str, windows: &[Snapshot]) -> Result<(String, Vec<Command>), String> {
-        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
-        let value: Value = self.call("eval_request", (code.to_owned(), windows))?;
+    fn eval(&mut self, code: &str, view: &View) -> Result<(String, Vec<Command>), String> {
+        let windows: Vec<WindowExport> = view.windows.iter().map(window_export).collect();
+        let value: Value = self.call("eval_request", (code.to_owned(), windows, view.workspace))?;
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
@@ -195,18 +196,14 @@ impl Script for RubyScript {
         Ok((inspected, commands))
     }
 
-    fn hook(
-        &mut self,
-        block: usize,
-        arg: &HookArg,
-        windows: &[Snapshot],
-    ) -> Result<Vec<Command>, String> {
+    fn hook(&mut self, block: usize, arg: &HookArg, view: &View) -> Result<Vec<Command>, String> {
         let (window, workspace) = match arg {
             HookArg::Window(s) => (Some(window_export(s)), None),
             HookArg::Workspace(n) => (None, Some(*n)),
         };
-        let windows: Vec<WindowExport> = windows.iter().map(window_export).collect();
-        let value: Value = self.call("run_hook", (block, window, workspace, windows))?;
+        let windows: Vec<WindowExport> = view.windows.iter().map(window_export).collect();
+        let current = view.workspace;
+        let value: Value = self.call("run_hook", (block, window, workspace, windows, current))?;
         if let Some(message) = RString::from_value(value) {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }

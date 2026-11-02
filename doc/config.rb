@@ -57,15 +57,15 @@ key("Mod-n") { minimize }
 key("Mod-Ctrl-n") { restore }
 # Every window, minimized ones too: picking one goes to it and restores it ([E8]).
 key("Mod-w") { spawn "rofi", "-show", "window" }
-# Minimized windows only; rofi shows the second column, and the pick's ID goes back
-# through sugoictl to `activate` ([H2]).
+# This workspace's minimized windows; rofi shows the second column, and the pick's ID
+# goes back through sugoictl to `activate` ([H2]).
 key("Mod-Shift-w") do
-  minimized = windows.select(&:minimized?)
+  minimized = windows(workspace: current_workspace).select(&:minimized?)
   if minimized.empty?
-    sh "notify-send sugoi 'No minimized windows'"
+    sh "notify-send sugoi 'No minimized windows here'"
   else
     lines = minimized.map do |w|
-      "#{w.id}\t#{w.workspace}   #{w.class_name}   #{w.title.tr("\t\n", "  ")}"
+      "#{w.id}\t#{w.class_name}   #{w.title.tr("\t\n", "  ")}"
     end
     rofi = "rofi -dmenu -i -no-custom -p Minimized -display-columns 2 -display-column-separator '\\t'"
     activate = "sugoictl 'windows.find { |w| w.id == {} }&.activate'"

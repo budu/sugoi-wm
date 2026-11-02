@@ -10,7 +10,7 @@ use log::{info, warn};
 use sugoictl::{Reply, encode};
 
 use super::Wm;
-use crate::{Error, Snapshot};
+use crate::Error;
 
 /// [I4] How long a client may take to send its request.
 const DEADLINE: Duration = Duration::from_secs(1);
@@ -180,8 +180,8 @@ impl Wm {
 
     /// [I2] Runs a request's Ruby, then its actions, as for a key.
     fn answer(&mut self, code: &str) -> Result<Reply, Error> {
-        let windows: Vec<Snapshot> = self.order.iter().map(|&w| self.snapshot(w)).collect();
-        match self.script.eval(code, &windows) {
+        let view = self.view();
+        match self.script.eval(code, &view) {
             Ok((value, commands)) => {
                 for command in commands {
                     self.execute(command)?;

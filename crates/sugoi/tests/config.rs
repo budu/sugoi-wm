@@ -729,6 +729,31 @@ fn h2_h3_a_key_block_activates_the_minimized_windows() {
     eventually("b focused", || session.focus() == b.window);
 }
 
+/// [H3] A key block knows the current workspace.
+#[test]
+fn h3_a_key_block_knows_the_current_workspace() {
+    let session = Session::with_config(
+        "key(\"Mod-z\") { workspace 2 }\n\
+         key(\"Mod-x\") { windows(workspace: current_workspace).each { |w| w.move_to 5 } }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, Z]);
+    eventually("a hidden on 1", || !session.viewable(a.window));
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    session.keys(&[SUPER, X]);
+    let desktop = |w| {
+        let atom = session.atom("_NET_WM_DESKTOP");
+        let reply = session.conn.get_property(false, w, atom, AtomEnum::CARDINAL, 0, 1);
+        reply.unwrap().reply().unwrap().value32().and_then(|mut v| v.next())
+    };
+    eventually("b on 5", || desktop(b.window) == Some(4));
+    assert_eq!(desktop(a.window), Some(0));
+}
+
 /// [H2] `activate` goes to the window's workspace.
 #[test]
 fn h2_activate_goes_to_the_windows_workspace() {

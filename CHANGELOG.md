@@ -31,9 +31,10 @@
 - **A window list** (trial). Mod-w opens rofi's window mode: every window on every
   workspace, minimized ones included; picking one goes to it and restores it.
 
-- **Minimized windows** (trial). Mod-Shift-w lists only the minimized windows in rofi;
-  picking one goes to it and restores it. Windows gain `minimized?` and `activate`,
-  and key and button blocks can query `windows` as hooks do ([H2], [H3]).
+- **Minimized windows** (trial). Mod-Shift-w lists the current workspace's minimized
+  windows in rofi; picking one restores it. Windows gain `minimized?` and `activate`;
+  key and button blocks can query `windows`, as hooks do, and every block, hook and
+  request knows `current_workspace` ([H2], [H3]).
 
 ## 0.1.0 (2026-11-01)
 
