@@ -47,7 +47,8 @@ hooks (M5), spawn limits (M6).
     order windows were managed in, changed by `swap`), wrapping, to the next window that
     can take the focus ([F4]), and raise it.
   - `swap :next` and `swap :previous` swap the focused window with its neighbor in the
-    window order; the focus stays on it.
+    window order; the focus stays on it. The cells stay: each window takes the other's
+    place and its share of the column ([Y3]).
   - `close` closes the focused window ([K1]); `kill` ends its whole app ([A4]).
   - `spawn "kitty"` and `spawn "bash", "-ic", "~/bin/superkitty", name: "superkitty"`
     start a program ([P1]); `name` defaults to the basename of the first argument.

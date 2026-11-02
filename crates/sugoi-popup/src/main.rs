@@ -49,15 +49,22 @@ fn run() -> Result<ExitCode, Error> {
     let resources = x11rb::resource_manager::new_from_default(&conn)?;
     let dpi = resources.get_value::<f64>("Xft.dpi", "").ok().flatten().unwrap_or(96.0);
     let scale = dpi / 96.0;
-    let image = render(markup, dpi, scale)?;
+    // [O1] The pixels go out as cairo's RGB24: 32 bits a pixel, least significant first.
+    let rgb24 = conn.setup().pixmap_formats.iter().any(|f| f.depth == 24 && f.bits_per_pixel == 32);
+    if screen.root_depth != 24 || !rgb24 || conn.setup().image_byte_order != ImageOrder::LSB_FIRST {
+        eprintln!("sugoi-popup: needs a 24-bit TrueColor screen");
+        return Ok(ExitCode::FAILURE);
+    }
 
-    // [O2] Under the pointer, below the work area's top.
+    // [O2] Under the pointer, below the work area's top, within the screen.
     let pointer = conn.query_pointer(screen.root)?.reply()?;
     let top = work_area_top(&conn, screen.root)?;
-    let (width, height) = (image.width as i32, image.height as i32);
-    let screen_width = i32::from(screen.width_in_pixels);
-    let x = (i32::from(pointer.root_x) - width / 2).clamp(0, (screen_width - width).max(0));
     let y = top + (GAP * scale).round() as i32;
+    let screen_width = i32::from(screen.width_in_pixels);
+    let room = (screen_width, (i32::from(screen.height_in_pixels) - y).max(1));
+    let image = render(markup, dpi, scale, room)?;
+    let (width, height) = (image.width as i32, image.height as i32);
+    let x = (i32::from(pointer.root_x) - width / 2).clamp(0, (screen_width - width).max(0));
 
     let window = conn.generate_id()?;
     let aux = CreateWindowAux::new()
@@ -109,8 +116,9 @@ struct Image {
     data: Vec<u8>,
 }
 
-/// [O1] Lays the markup out, or the text when it does not parse, and draws it.
-fn render(markup: &str, dpi: f64, scale: f64) -> Result<Image, Error> {
+/// [O1] [O2] Lays the markup out, or the text when it does not parse, and draws it,
+/// within `room`: what does not fit is cut inside the border.
+fn render(markup: &str, dpi: f64, scale: f64, room: (i32, i32)) -> Result<Image, Error> {
     let layout = |cr: &cairo::Context| {
         let layout = pangocairo::functions::create_layout(cr);
         pangocairo::functions::context_set_resolution(&layout.context(), dpi);
@@ -126,22 +134,28 @@ fn render(markup: &str, dpi: f64, scale: f64) -> Result<Image, Error> {
     let probe = cairo::ImageSurface::create(cairo::Format::Rgb24, 1, 1)?;
     let (_, logical) = layout(&cairo::Context::new(&probe)?).pixel_extents();
     let inset = ((MARGIN + BORDER) * scale).round();
-    let width = (f64::from(logical.width()) + 2.0 * inset) as i32;
-    let height = (f64::from(logical.height()) + 2.0 * inset) as i32;
+    let width = ((f64::from(logical.width()) + 2.0 * inset) as i32).min(room.0);
+    let height = ((f64::from(logical.height()) + 2.0 * inset) as i32).min(room.1);
 
     let mut surface = cairo::ImageSurface::create(cairo::Format::Rgb24, width, height)?;
     {
         let cr = cairo::Context::new(&surface)?;
         let border = (BORDER * scale).round().max(1.0);
-        cr.set_source_rgb(BORDER_COLOR.0, BORDER_COLOR.1, BORDER_COLOR.2);
-        cr.paint()?;
-        cr.set_source_rgb(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         let (w, h) = (f64::from(width), f64::from(height));
+        cr.set_source_rgb(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
+        cr.paint()?;
+        // The text within the margins; the border goes on top, so a cut keeps it.
+        cr.save()?;
         cr.rectangle(border, border, w - 2.0 * border, h - 2.0 * border);
-        cr.fill()?;
+        cr.clip();
         cr.set_source_rgb(FOREGROUND.0, FOREGROUND.1, FOREGROUND.2);
         cr.move_to(inset - f64::from(logical.x()), inset - f64::from(logical.y()));
         pangocairo::functions::show_layout(&cr, &layout(&cr));
+        cr.restore()?;
+        cr.set_source_rgb(BORDER_COLOR.0, BORDER_COLOR.1, BORDER_COLOR.2);
+        cr.set_line_width(border);
+        cr.rectangle(border / 2.0, border / 2.0, w - border, h - border);
+        cr.stroke()?;
     }
     surface.flush();
     let stride = surface.stride() as usize;

@@ -9,13 +9,15 @@
 //! order 0x1a00003 0x2200004
 //! history 0x2200004 0x1a00003
 //! minimized 0x2200004
-//! window 0x1a00003 1 100 80 640 400 1.25
+//! window 0x1a00003 1 100 80 640 400 1.25 5151 81971
 //! ```
 //!
-//! A window line is its ID, whether it floats, its floating geometry and its share.
-//! Lines sugoi does not understand are skipped; another version is ignored whole.
+//! A window line is its ID, whether it floats, its floating geometry, its share, and its
+//! process's ID and start time (`-` when unknown, [A2]), so that a window reusing the ID
+//! is not taken for it. Lines sugoi does not understand are skipped; another version is
+//! ignored whole.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::debug;
 use x11rb::protocol::xproto::*;
@@ -44,23 +46,17 @@ struct KeptWindow {
     floating: bool,
     rect: Rect,
     share: f32,
+    /// The process's ID and start time; `None` from a line written before they were.
+    process: Option<(Option<u32>, Option<u64>)>,
 }
 
-fn layout_name(layout: Layout) -> &'static str {
-    match layout {
-        Layout::Tile => "tile",
-        Layout::Max => "max",
-        Layout::Float => "float",
-    }
+/// A number, or `-` for none.
+fn optional<T: std::str::FromStr>(text: &str) -> Option<Option<T>> {
+    if text == "-" { Some(None) } else { text.parse().ok().map(Some) }
 }
 
-fn layout_named(name: &str) -> Option<Layout> {
-    match name {
-        "tile" => Some(Layout::Tile),
-        "max" => Some(Layout::Max),
-        "float" => Some(Layout::Float),
-        _ => None,
-    }
+fn or_dash<T: std::fmt::Display>(value: Option<T>) -> String {
+    value.map_or_else(|| "-".to_owned(), |v| v.to_string())
 }
 
 fn window_id(text: &str) -> Option<Window> {
@@ -95,12 +91,17 @@ fn record(kept: &mut Kept, words: &[&str]) -> Option<()> {
         ["desk", n, layout, width] => {
             let n = n.parse().ok().filter(|&n: &usize| n < COUNT)?;
             let width: f32 = width.parse().ok().filter(|w: &f32| w.is_finite())?;
-            kept.desks.push((n, layout_named(layout)?, width));
+            kept.desks.push((n, Layout::from_name(layout)?, width));
         }
         ["order", ..] => kept.order = list(),
         ["history", ..] => kept.history = list(),
         ["minimized", ..] => kept.minimized = list(),
-        ["window", id, floating, x, y, width, height, share] => {
+        ["window", id, floating, x, y, width, height, share, process @ ..] => {
+            let process = match process {
+                [] => None,
+                [pid, start] => Some((optional(pid)?, optional(start)?)),
+                _ => return None,
+            };
             let (x, y) = (x.parse().ok()?, y.parse().ok()?);
             let rect = Rect::new(x, y, width.parse().ok()?, height.parse().ok()?);
             let share: f32 = share.parse().ok().filter(|s: &f32| s.is_finite() && *s > 0.0)?;
@@ -109,7 +110,8 @@ fn record(kept: &mut Kept, words: &[&str]) -> Option<()> {
                 "0" => false,
                 _ => return None,
             };
-            kept.windows.insert(window_id(id)?, KeptWindow { floating, rect, share });
+            let window = KeptWindow { floating, rect, share, process };
+            kept.windows.insert(window_id(id)?, window);
         }
         _ => return None,
     }
@@ -121,7 +123,7 @@ impl Wm {
     fn state_text(&self) -> String {
         let mut text = format!("{HEADER}\nback {}\n", self.back);
         for (n, desk) in self.desks.iter().enumerate() {
-            let layout = layout_name(desk.layout);
+            let layout = desk.layout.name();
             text += &format!("desk {n} {layout} {}\n", desk.master.width);
         }
         text += &format!("order{}\n", ids(&self.order));
@@ -131,8 +133,9 @@ impl Wm {
             let c = &self.clients[&window];
             let r = c.rect;
             let floating = u8::from(c.floating);
+            let (pid, start) = (or_dash(c.info.pid), or_dash(c.started));
             text += &format!(
-                "window {window:#x} {floating} {} {} {} {} {}\n",
+                "window {window:#x} {floating} {} {} {} {} {} {pid} {start}\n",
                 r.x, r.y, r.width, r.height, c.share
             );
         }
@@ -177,25 +180,42 @@ impl Wm {
             }
             desk.master.width = width.clamp(MIN_FACTOR, MAX_FACTOR);
         }
+        // Only the windows that are the ones the state names: same ID, same process.
+        let known: HashSet<Window> = kept
+            .windows
+            .iter()
+            .filter(|(window, k)| {
+                self.clients.get(window).is_some_and(|c| {
+                    k.process.is_none_or(|process| process == (c.info.pid, c.started))
+                })
+            })
+            .map(|(&window, _)| window)
+            .collect();
         let screen = self.screen;
-        for (window, k) in &kept.windows {
-            if let Some(client) = self.clients.get_mut(window) {
-                client.floating = k.floating;
-                client.rect = layout::on_screen(screen, k.rect);
-                client.share = k.share;
-            }
+        for window in &known {
+            let (k, client) = (kept.windows[window], self.clients.get_mut(window).expect("known"));
+            client.floating = k.floating;
+            client.rect = layout::on_screen(screen, k.rect);
+            client.share = k.share;
         }
-        for &window in &kept.minimized {
-            if let Some(client) = self.clients.get_mut(&window) {
+        for window in kept.minimized.iter().filter(|w| known.contains(w)) {
+            let client = self.clients.get_mut(window).expect("known");
+            // A name repeated in the state is the same window.
+            if !client.minimized {
                 client.minimized = true;
-                self.minimized.push(window);
+                self.minimized.push(*window);
             }
         }
-        // Windows the state names, in its order; the others after, as adopted.
+        // Windows the state names, once each, in its order; the others after, as adopted.
         let reorder = |list: &mut Vec<Window>, saved: &[Window]| {
-            let mut ordered: Vec<Window> =
-                saved.iter().copied().filter(|w| list.contains(w)).collect();
-            ordered.extend(list.iter().copied().filter(|w| !saved.contains(w)));
+            let mut ordered: Vec<Window> = Vec::new();
+            for &window in saved.iter().filter(|w| known.contains(w)) {
+                if !ordered.contains(&window) {
+                    ordered.push(window);
+                }
+            }
+            let rest: Vec<Window> = list.iter().copied().filter(|w| !ordered.contains(w)).collect();
+            ordered.extend(rest);
             *list = ordered;
         };
         reorder(&mut self.order, &kept.order);
@@ -218,8 +238,19 @@ mod tests {
         assert_eq!(kept.order, [0x10, 0x20]);
         assert_eq!(kept.history, [0x20, 0x10]);
         assert_eq!(kept.minimized, [0x20]);
-        let window = KeptWindow { floating: true, rect: Rect::new(-5, 80, 640, 400), share: 1.25 };
+        let rect = Rect::new(-5, 80, 640, 400);
+        let window = KeptWindow { floating: true, rect, share: 1.25, process: None };
         assert_eq!(kept.windows[&0x10], window);
+    }
+
+    #[test]
+    fn a_window_line_keeps_its_process_or_dashes() {
+        let text = "sugoi-state 1\nwindow 0x10 0 0 0 9 9 1 5151 81971\n\
+                    window 0x20 0 0 0 9 9 1 - -\nwindow 0x30 0 0 0 9 9 1 5151\n";
+        let kept = parse(text).unwrap();
+        assert_eq!(kept.windows[&0x10].process, Some((Some(5151), Some(81971))));
+        assert_eq!(kept.windows[&0x20].process, Some((None, None)));
+        assert!(!kept.windows.contains_key(&0x30));
     }
 
     #[test]

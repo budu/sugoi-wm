@@ -204,6 +204,22 @@ fn o2_the_popup_stays_on_screen() {
     exit(&mut child);
 }
 
+/// [O2]
+#[test]
+fn o2_a_long_popup_is_cut_to_the_screen() {
+    let x = xvfb(96);
+    x.pointer(600, 10);
+    let mut child = x.run(&"a line of text\n".repeat(400));
+    let (px, py, width, height) = x.shown();
+    assert_eq!(py, TOP + 5);
+    assert_eq!(py + height, SCREEN.1, "down to the screen's bottom");
+    let bottom = py + height - 1;
+    assert_eq!(x.pixel(px + width / 2, bottom), 0xaa007b, "the border, kept");
+    x.fake(KEY_PRESS_EVENT, 9);
+    x.fake(KEY_RELEASE_EVENT, 9);
+    assert!(exit(&mut child).success());
+}
+
 /// [O3]
 #[test]
 fn o3_the_closing_click_goes_nowhere_else() {

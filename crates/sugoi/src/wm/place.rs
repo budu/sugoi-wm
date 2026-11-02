@@ -470,9 +470,19 @@ impl Wm {
                 && (r.y..r.y + r.height as i32).contains(&y)
         });
         let Some(other) = under else { return Ok(()) };
-        let a = self.order.iter().position(|&w| w == window).expect("ordered");
-        let b = self.order.iter().position(|&w| w == other).expect("ordered");
-        self.order.swap(a, b);
+        self.swap_windows(window, other)
+    }
+
+    /// [D5] [G1] Two windows trade places in the window order, and their shares, so the
+    /// cells stay where they were.
+    pub(super) fn swap_windows(&mut self, a: Window, b: Window) -> Result<(), Error> {
+        let i = self.order.iter().position(|&w| w == a);
+        let j = self.order.iter().position(|&w| w == b);
+        let (Some(i), Some(j)) = (i, j) else { return Ok(()) };
+        self.order.swap(i, j);
+        let share = self.clients[&a].share;
+        let other = std::mem::replace(&mut self.clients.get_mut(&b).expect("managed").share, share);
+        self.clients.get_mut(&a).expect("managed").share = other;
         self.arrange()
     }
 

@@ -290,12 +290,7 @@ fn command(parts: &[String]) -> Result<Command, String> {
 }
 
 fn layout(name: &str) -> Result<Layout, String> {
-    match name {
-        "tile" => Ok(Layout::Tile),
-        "max" => Ok(Layout::Max),
-        "float" => Ok(Layout::Float),
-        other => Err(format!("bad layout {other:?}")),
-    }
+    Layout::from_name(name).ok_or_else(|| format!("bad layout {name:?}"))
 }
 
 fn number(text: &str) -> Result<f32, String> {

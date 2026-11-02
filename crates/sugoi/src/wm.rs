@@ -445,7 +445,10 @@ impl Wm {
                 continue;
             }
             self.publish()?;
-            self.save_state()?;
+            // [V11] Not at the pointer's rate: a drag's state is saved once it ends.
+            if self.drag.is_none() {
+                self.save_state()?;
+            }
             self.conn.flush()?;
             let mut fds = vec![
                 PollFd::new(self.conn.stream(), PollFlags::IN),
@@ -488,12 +491,7 @@ impl Wm {
             Command::Swap(direction) => {
                 let other = self.neighbor(direction, false);
                 if let (Some(focused), Some(other)) = (self.focused, other) {
-                    let a = self.order.iter().position(|&w| w == focused);
-                    let b = self.order.iter().position(|&w| w == other);
-                    if let (Some(a), Some(b)) = (a, b) {
-                        self.order.swap(a, b);
-                        self.arrange()?;
-                    }
+                    self.swap_windows(focused, other)?;
                 }
             }
             Command::CloseFocused => {

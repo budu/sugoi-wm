@@ -56,7 +56,10 @@ identifiers in brackets. Users number workspaces 1 to 30; EWMH numbers them 0 to
   ([Y3]); each workspace's layout and master width ([V3]), and the workspace before
   the last switch ([V6]). On start, after the config loads, the windows it adopts get
   that state back, over rules as their workspace does ([U6]); windows the state does
-  not name come after those it does, in [S2]'s order. A saved layout the config's
+  not name come after those it does, in [S2]'s order. A window counts as named only
+  when its process is the one saved with it ([A2]), so a new window reusing an old
+  ID starts fresh; a name repeated in the state counts once. The state is written
+  after a drag, not during it. A saved layout the config's
   cycle lacks gives way to its first ([Y7]), and the master side stays the config's.
   The stacking order is X's, which adoption keeps ([S2]). So a restart, or a quit then
   a start, changes nothing on screen.

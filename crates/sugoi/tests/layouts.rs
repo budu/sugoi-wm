@@ -324,6 +324,27 @@ fn g1_a_tiled_window_trades_places_with_the_one_under_the_pointer() {
     release(&session, 1);
 }
 
+/// [G1] and [D5] The cells stay: a swap does not move the edge under the pointer.
+#[test]
+fn g1_a_swap_keeps_the_cells_so_it_does_not_swap_back() {
+    let session = mouse();
+    let apps = map(&session, 3);
+    session.click(100, 100);
+    eventually("b focused", || session.focus() == apps[1].window);
+    send(&session, Command::WindowHeight(-0.3));
+    eventually("b small", || session.outer(apps[1].window) == (0, 0, 640, 160));
+    // Just inside c, which a swap without shares would turn back into c's cell.
+    hold(&session, 1, (100, 80));
+    settle();
+    session.move_pointer(100, 200);
+    eventually("swapped", || session.outer(apps[2].window) == (0, 0, 640, 160));
+    session.move_pointer(100, 210);
+    settle();
+    assert_eq!(session.outer(apps[1].window), (0, 160, 640, 640));
+    assert_eq!(session.outer(apps[2].window), (0, 0, 640, 160));
+    release(&session, 1);
+}
+
 /// [G1]
 #[test]
 fn g1_move_drags_the_clicked_window_even_if_it_cannot_take_the_focus() {
@@ -352,6 +373,39 @@ fn g1_a_floating_window_follows_the_pointer() {
     let from = (x as i16 + 20, y as i16 + 20);
     session.drag(SUPER, 1, from, (from.0 + 100, from.1 + 50));
     eventually("moved", || session.outer(apps[1].window) == (x + 100, y + 50, w, h));
+}
+
+/// [V11] and [G1] A drag's state is saved once, when it ends.
+#[test]
+fn v11_a_drag_saves_the_state_once() {
+    let session = mouse();
+    let apps = map(&session, 2);
+    send(&session, Command::Center(Some(0.5)));
+    eventually("centered", || session.outer(apps[1].window) == (320, 200, 640, 400));
+    settle();
+    let watcher = &apps[0].conn;
+    let aux = ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE);
+    watcher.change_window_attributes(session.root, &aux).unwrap();
+    watcher.sync().unwrap();
+    hold(&session, 1, (400, 300));
+    settle();
+    for step in 1..=10 {
+        session.move_pointer(400 + 10 * step, 300);
+    }
+    settle();
+    release(&session, 1);
+    eventually("moved", || session.outer(apps[1].window) == (420, 200, 640, 400));
+    settle();
+    let state = session.atom("_SUGOI_STATE");
+    let mut writes = 0;
+    while let Some(event) = watcher.poll_for_event().unwrap() {
+        if let Event::PropertyNotify(e) = event
+            && e.atom == state
+        {
+            writes += 1;
+        }
+    }
+    assert_eq!(writes, 1);
 }
 
 /// [G2]

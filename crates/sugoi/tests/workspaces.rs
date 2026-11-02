@@ -473,3 +473,59 @@ fn v11_the_focus_history_survives() {
     go(&session, Goto::Number(1));
     eventually("a, focused last", || session.focus() == a.window);
 }
+
+/// Sets the root's kept state, as a previous sugoi would have.
+fn kept_state(session: &Session, text: &str) {
+    use x11rb::wrapper::ConnectionExt as _;
+    let (atom, utf8) = (session.atom("_SUGOI_STATE"), session.atom("UTF8_STRING"));
+    session
+        .conn
+        .change_property8(PropMode::REPLACE, session.root, atom, utf8, text.as_bytes())
+        .unwrap();
+    session.conn.sync().unwrap();
+}
+
+/// [V11]
+#[test]
+fn v11_a_window_reusing_an_id_does_not_inherit_its_state() {
+    let mut session = Session::without_wm();
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    // Saved for another process: floating and minimized there.
+    let w = a.window;
+    kept_state(
+        &session,
+        &format!(
+            "sugoi-state 1\norder {w:#x}\nminimized {w:#x}\nwindow {w:#x} 1 10 10 300 200 1 1 1\n"
+        ),
+    );
+    session.start_wm_with(Settings::default());
+    eventually("a tiled, shown", || session.outer(a.window) == (0, 0, 1280, 800));
+    assert!(session.viewable(a.window));
+}
+
+/// [V11]
+#[test]
+fn v11_a_name_repeated_in_the_state_counts_once() {
+    let mut session = Session::without_wm();
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    b.map();
+    let (wa, wb) = (a.window, b.window);
+    // Window lines without a process (an older state) name their windows.
+    let lines = format!("window {wa:#x} 0 0 0 9 9 1\nwindow {wb:#x} 0 0 0 9 9 1\n");
+    let order = format!("order {wa:#x} {wa:#x} {wb:#x}\nminimized {wb:#x} {wb:#x}\n");
+    kept_state(&session, &format!("sugoi-state 1\n{order}{lines}"));
+    session.start_wm_with(Settings::default());
+    eventually("a alone in the layout", || session.outer(a.window) == (0, 0, 1280, 800));
+    assert!(!session.viewable(b.window));
+    send(&session, Command::Restore);
+    eventually("b back", || session.viewable(b.window));
+    eventually("a master", || session.outer(a.window) == (640, 0, 640, 800));
+    assert_eq!(session.outer(b.window), (0, 0, 640, 800));
+    // No stale entry: the next start shows b as it is now.
+    restart(&mut session, Settings::default());
+    eventually("b still shown", || session.outer(b.window) == (0, 0, 640, 800));
+    assert!(session.viewable(b.window));
+}

@@ -261,9 +261,7 @@ module Sugoi
     rescue ScriptError, StandardError => e
       safely_describe(e)
     ensure
-      @queue = nil
-      @windows = nil
-      @current_workspace = nil
+      unsee
     end
 
     # [H1] [H4] Runs hook block `index` with a window or a workspace number, and the
@@ -277,9 +275,7 @@ module Sugoi
     rescue ScriptError, StandardError => e
       safely_describe(e)
     ensure
-      @queue = nil
-      @windows = nil
-      @current_workspace = nil
+      unsee
     end
 
     # [I2] Runs a request from sugoictl: [its value, inspected, and its commands], or an
@@ -293,9 +289,7 @@ module Sugoi
     rescue ScriptError, StandardError => e
       safely_describe(e)
     ensure
-      @queue = nil
-      @windows = nil
-      @current_workspace = nil
+      unsee
     end
 
     def windows = @windows || raise("windows are only known in a block or a request")
@@ -304,10 +298,16 @@ module Sugoi
       @current_workspace || raise("the workspace is only known in a block or a request")
     end
 
-    # [H3] What a block, hook or request sees while it runs.
+    # [H3] What a block, hook or request sees while it runs, and forgets after.
     def see(windows, current)
       @windows = windows.map { |w| Window.new(*w) }.freeze
       @current_workspace = current
+    end
+
+    def unsee
+      @queue = nil
+      @windows = nil
+      @current_workspace = nil
     end
 
     def queue(*command)
