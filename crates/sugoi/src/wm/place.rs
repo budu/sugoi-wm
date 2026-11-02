@@ -10,13 +10,25 @@ use super::{Wm, lost};
 use crate::layout::{self, Layout, MAX_FACTOR, MIN_FACTOR, Rect};
 use crate::{Choice, Error, State};
 
-/// [G1] [G2] A mouse drag in progress.
+/// [G1] [G2] [G3] A mouse drag in progress.
 pub(super) struct Drag {
     window: Window,
-    resize: bool,
+    kind: Kind,
     /// Where the pointer started, and the window's rectangle then.
     pointer: (i16, i16),
     rect: Rect,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    /// [G1] A floating window follows the pointer.
+    Move,
+    /// [G2] From a corner; the opposite one stays.
+    Resize { left: bool, top: bool },
+    /// [G1] A tiled window trades places with the tiled windows the pointer enters.
+    Swap,
+    /// [G3] The master width and the window's edge follow the pointer.
+    Layout,
 }
 
 impl Drag {
@@ -209,8 +221,8 @@ impl Wm {
         self.arrange()
     }
 
-    /// Takes a tiled window out of the layout where it is ([W1], [W7], [G1]).
-    /// A tiled, maximized or fullscreen window floats where it shows ([W7], [G1]).
+    /// Takes a tiled window out of the layout where it is ([W1], [W7]).
+    /// A tiled, maximized or fullscreen window floats where it shows ([W7], [G1], [G2]).
     pub(super) fn float(&mut self, window: Window) {
         let tiled = self.tiled(window);
         let rect = self.placed(window);
@@ -307,72 +319,179 @@ impl Wm {
         self.arrange()
     }
 
-    /// [G1] [G2] Starts dragging the window the last button press hit.
+    /// [G1] [G2] [G3] Starts dragging the window the last button press hit.
     /// The press is the one being handled: a `move` from a key binding finds none.
     pub(super) fn start_drag(&mut self, resize: bool) -> Result<(), Error> {
         let Some((x, y, Some(window))) = self.press.take() else { return Ok(()) };
         if !self.visible(window) {
             return Ok(());
         }
+        let tiled = self.tiled(window);
+        let layout = self.desk().layout;
+        if tiled && layout != Layout::Tile {
+            return Ok(());
+        }
+        let shown = self.placed(window);
+        let kind = match (tiled, resize) {
+            (true, true) => Kind::Layout,
+            (true, false) => Kind::Swap,
+            (false, false) => Kind::Move,
+            (false, true) => Kind::Resize {
+                left: i32::from(x) < shown.x + shown.width as i32 / 2,
+                top: i32::from(y) < shown.y + shown.height as i32 / 2,
+            },
+        };
+        let cursor = match kind {
+            Kind::Move | Kind::Swap => self.cursors.moving,
+            Kind::Resize { left, top } => {
+                self.cursors.corners[2 * usize::from(!top) + usize::from(!left)]
+            }
+            Kind::Layout => self.cursors.layout,
+        };
         // Grab first: if another client holds the pointer, nothing changes.
         let mask = EventMask::POINTER_MOTION | EventMask::BUTTON_RELEASE;
         let (root, async_) = (self.root, GrabMode::ASYNC);
-        let cursor = if resize { self.cursors.resizing } else { self.cursors.moving };
         let grab =
             self.conn.grab_pointer(false, root, mask, async_, async_, NONE, cursor, CURRENT_TIME);
         if grab?.reply().map_err(lost)?.status != GrabStatus::SUCCESS {
             return Ok(());
         }
-        self.float(window);
-        self.arrange()?;
-        self.raise(window)?;
+        let mut pointer = (x, y);
+        if !tiled {
+            self.float(window);
+            self.arrange()?;
+            self.raise(window)?;
+        }
         let rect = self.clients[&window].rect;
-        let pointer = if resize {
-            // The corner, kept on screen, where X would clamp the warp anyway.
-            let screen = self.screen;
-            let right = rect.x + rect.width as i32 - 1;
-            let bottom = rect.y + rect.height as i32 - 1;
-            let right = right.min(screen.x + screen.width as i32 - 1).max(screen.x);
-            let bottom = bottom.min(screen.y + screen.height as i32 - 1).max(screen.y);
-            let corner = (right as i16, bottom as i16);
-            self.conn.warp_pointer(NONE, self.root, 0, 0, 0, 0, corner.0, corner.1)?;
-            corner
-        } else {
-            (x, y)
+        let target = match kind {
+            Kind::Resize { left, top } => {
+                let right = rect.x + rect.width as i32 - 1;
+                let bottom = rect.y + rect.height as i32 - 1;
+                Some((if left { rect.x } else { right }, if top { rect.y } else { bottom }))
+            }
+            Kind::Layout => Some(self.layout_handle(window)),
+            Kind::Move | Kind::Swap => None,
         };
-        self.drag = Some(Drag { window, resize, pointer, rect });
+        if let Some((tx, ty)) = target {
+            // Kept on screen, where X would clamp the warp anyway.
+            let screen = self.root_rect;
+            let tx = tx.clamp(screen.x, screen.x + screen.width as i32 - 1) as i16;
+            let ty = ty.clamp(screen.y, screen.y + screen.height as i32 - 1) as i16;
+            self.conn.warp_pointer(NONE, self.root, 0, 0, 0, 0, tx, ty)?;
+            pointer = (tx, ty);
+        }
+        self.drag = Some(Drag { window, kind, pointer, rect });
         Ok(())
     }
 
-    /// [G1] [G2]
+    /// [G3] Where a layout drag starts: on the edge between the columns, at the window's
+    /// bottom edge, its top one if it is the last of its column, its middle if alone.
+    fn layout_handle(&self, window: Window) -> (i32, i32) {
+        let tiled = self.tiled_windows();
+        let index = tiled.iter().position(|&w| w == window).expect("a tiled window");
+        let master = self.desk().master;
+        let shares: Vec<f32> = tiled[1..].iter().map(|w| self.clients[w].share).collect();
+        let cell = layout::tile(self.screen, master, &shares)[index];
+        let x = layout::column_edge(self.screen, master);
+        let y = if index == 0 || tiled.len() == 2 {
+            cell.y + cell.height as i32 / 2
+        } else if index + 1 == tiled.len() {
+            cell.y
+        } else {
+            cell.y + cell.height as i32
+        };
+        (x, y)
+    }
+
+    /// [G1] [G2] [G3]
     pub(super) fn drag_to(&mut self, x: i16, y: i16) -> Result<(), Error> {
         let Some(drag) = &self.drag else { return Ok(()) };
-        let (dx, dy) = (i32::from(x - drag.pointer.0), i32::from(y - drag.pointer.1));
-        let mut rect = drag.rect;
-        if drag.resize {
-            let least = 2 * u32::from(self.border.width) + 1;
-            rect.width = (rect.width as i32 + dx).max(least as i32) as u32;
-            rect.height = (rect.height as i32 + dy).max(least as i32) as u32;
-        } else {
-            rect.x += dx;
-            rect.y += dy;
-        }
-        let window = drag.window;
+        let (window, kind) = (drag.window, drag.kind);
         // A key may have changed the window's state during the drag: it wins.
         // A switch or a move may have hidden it ([V2]).
-        let shown = self.visible(window) && !self.tiled(window);
-        let floating = shown
-            && !{
+        let tiled_drag = matches!(kind, Kind::Swap | Kind::Layout);
+        let still = self.visible(window)
+            && if tiled_drag {
+                self.tiled(window) && self.desk().layout == Layout::Tile
+            } else {
                 let c = &self.clients[&window];
-                c.maximized || c.fullscreen
+                !self.tiled(window) && !(c.maximized || c.fullscreen)
             };
-        if !floating {
+        if !still {
             return self.end_drag();
         }
-        self.clients.get_mut(&window).expect("managed").rect = rect;
-        // Only the dragged window moves: no arrange, no round trip per motion.
-        self.place(window, rect, self.border.width)?;
-        Ok(())
+        match kind {
+            Kind::Swap => self.swap_under(window, x, y),
+            Kind::Layout => self.resize_layout(window, x, y),
+            Kind::Move | Kind::Resize { .. } => {
+                let rect = self.dragged_rect(x, y);
+                self.clients.get_mut(&window).expect("managed").rect = rect;
+                // Only the dragged window moves: no arrange, no round trip per motion.
+                self.place(window, rect, self.border.width)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// [G1] [G2] The floating window's rectangle with the pointer at (x, y).
+    fn dragged_rect(&self, x: i16, y: i16) -> Rect {
+        let drag = self.drag.as_ref().expect("dragging");
+        let (dx, dy) = (i32::from(x - drag.pointer.0), i32::from(y - drag.pointer.1));
+        let mut rect = drag.rect;
+        let least = 2 * i32::from(self.border.width) + 1;
+        match drag.kind {
+            Kind::Resize { left, top } => {
+                let (width, height) = (rect.width as i32, rect.height as i32);
+                let new_width = (if left { width - dx } else { width + dx }).max(least);
+                let new_height = (if top { height - dy } else { height + dy }).max(least);
+                if left {
+                    rect.x += width - new_width;
+                }
+                if top {
+                    rect.y += height - new_height;
+                }
+                (rect.width, rect.height) = (new_width as u32, new_height as u32);
+            }
+            _ => {
+                rect.x += dx;
+                rect.y += dy;
+            }
+        }
+        rect
+    }
+
+    /// [G1] Trades places with the tiled window under the pointer, if another.
+    fn swap_under(&mut self, window: Window, x: i16, y: i16) -> Result<(), Error> {
+        let (x, y) = (i32::from(x), i32::from(y));
+        let under = self.tiled_windows().into_iter().find(|&w| {
+            let r = self.placed(w);
+            w != window
+                && (r.x..r.x + r.width as i32).contains(&x)
+                && (r.y..r.y + r.height as i32).contains(&y)
+        });
+        let Some(other) = under else { return Ok(()) };
+        let a = self.order.iter().position(|&w| w == window).expect("ordered");
+        let b = self.order.iter().position(|&w| w == other).expect("ordered");
+        self.order.swap(a, b);
+        self.arrange()
+    }
+
+    /// [G3] The master width from x, the window's edge in its column from y.
+    fn resize_layout(&mut self, window: Window, x: i16, y: i16) -> Result<(), Error> {
+        let area = self.screen;
+        let master = &mut self.desk_mut().master;
+        master.width = layout::master_width_at(area, master.side, i32::from(x));
+        let tiled = self.tiled_windows();
+        let index = tiled.iter().position(|&w| w == window).expect("a tiled window");
+        if index > 0 && tiled.len() > 2 {
+            let mut shares: Vec<f32> = tiled[1..].iter().map(|w| self.clients[w].share).collect();
+            let edge = (i32::from(y) - area.y) as f32 / area.height as f32;
+            layout::share_to_edge(&mut shares, index - 1, edge.clamp(0.0, 1.0));
+            for (w, share) in tiled[1..].iter().zip(shares) {
+                self.clients.get_mut(w).expect("tiled windows are managed").share = share;
+            }
+        }
+        self.arrange()
     }
 
     pub(super) fn end_drag(&mut self) -> Result<(), Error> {

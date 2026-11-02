@@ -95,11 +95,13 @@ const NORMAL_STATE: u32 = 1;
 /// [F3] Buttons that focus on click; the wheel (4 and 5) is not grabbed.
 const CLICKS: [ButtonIndex; 3] = [ButtonIndex::M1, ButtonIndex::M2, ButtonIndex::M3];
 
-/// [S4] [G1] [G2] The pointer's cursors; `NONE` is X's own.
+/// [S4] [G1] [G2] [G3] The pointer's cursors; `NONE` is X's own.
 struct Cursors {
     normal: Cursor,
     moving: Cursor,
-    resizing: Cursor,
+    /// By corner: top left, top right, bottom left, bottom right.
+    corners: [Cursor; 4],
+    layout: Cursor,
 }
 
 impl Cursors {
@@ -109,15 +111,22 @@ impl Cursors {
         let load = || -> Result<Cursors, Box<dyn std::error::Error>> {
             let resources = x11rb::resource_manager::new_from_default(conn)?;
             let theme = x11rb::cursor::Handle::new(conn, screen, &resources)?.reply()?;
+            let corner = |name| theme.load_cursor(conn, name);
             Ok(Cursors {
                 normal: theme.load_cursor(conn, "left_ptr")?,
                 moving: theme.load_cursor(conn, "fleur")?,
-                resizing: theme.load_cursor(conn, "bottom_right_corner")?,
+                corners: [
+                    corner("top_left_corner")?,
+                    corner("top_right_corner")?,
+                    corner("bottom_left_corner")?,
+                    corner("bottom_right_corner")?,
+                ],
+                layout: theme.load_cursor(conn, "cross")?,
             })
         };
         load().unwrap_or_else(|e| {
             warn!("no cursors: {e}");
-            Cursors { normal: NONE, moving: NONE, resizing: NONE }
+            Cursors { normal: NONE, moving: NONE, corners: [NONE; 4], layout: NONE }
         })
     }
 }

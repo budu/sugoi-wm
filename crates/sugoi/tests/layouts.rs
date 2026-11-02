@@ -274,47 +274,182 @@ fn w7_center_with_a_size_floats_the_window() {
     eventually("a alone in the layout", || session.outer(apps[0].window) == FULL);
 }
 
-fn mouse() -> Session {
+fn mouse_settings() -> Settings {
     let buttons = vec![
         Binding::commands("Mod-1", vec![Command::Move]),
         Binding::commands("Mod-3", vec![Command::Resize]),
     ];
-    Session::with_settings(Settings { buttons, ..Settings::default() })
+    Settings { buttons, ..Settings::default() }
 }
 
-/// [G1]
-#[test]
-fn g1_mod_drag_moves_and_floats_the_window() {
-    let session = mouse();
-    let apps = map(&session, 2);
-    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
-    session.drag(SUPER, 1, (100, 100), (200, 150));
-    eventually("moved", || session.outer(apps[1].window) == (100, 50, 640, 800));
-    eventually("a alone in the layout", || session.outer(apps[0].window) == FULL);
+fn mouse() -> Session {
+    Session::with_settings(mouse_settings())
 }
 
-/// [G2]
-#[test]
-fn g2_mod_right_drag_resizes_from_the_corner() {
-    let session = mouse();
-    let apps = map(&session, 2);
-    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
+/// Holds Mod and `button` at `from`, so sugoi starts a drag there.
+fn hold(session: &Session, button: u8, from: (i16, i16)) {
     let fake = |kind, detail, x, y| {
         session.conn.xtest_fake_input(kind, detail, 0, session.root, x, y, 0).unwrap();
         session.conn.sync().unwrap();
     };
-    fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
+    fake(MOTION_NOTIFY_EVENT, 0, from.0, from.1);
     fake(KEY_PRESS_EVENT, SUPER, 0, 0);
-    fake(BUTTON_PRESS_EVENT, 3, 0, 0);
-    let pointer = || {
-        let p = session.conn.query_pointer(session.root).unwrap().reply().unwrap();
-        (p.root_x, p.root_y)
-    };
-    eventually("pointer at the corner", || pointer() == (639, 799));
-    fake(MOTION_NOTIFY_EVENT, 0, 689, 749);
-    fake(BUTTON_RELEASE_EVENT, 3, 0, 0);
-    fake(KEY_RELEASE_EVENT, SUPER, 0, 0);
-    eventually("resized", || session.outer(apps[1].window) == (0, 0, 690, 750));
+    fake(BUTTON_PRESS_EVENT, button, 0, 0);
+}
+
+fn release(session: &Session, button: u8) {
+    for (kind, detail) in [(BUTTON_RELEASE_EVENT, button), (KEY_RELEASE_EVENT, SUPER)] {
+        session.conn.xtest_fake_input(kind, detail, 0, session.root, 0, 0, 0).unwrap();
+    }
+    session.conn.sync().unwrap();
+}
+
+fn pointer(session: &Session) -> (i16, i16) {
+    let p = session.conn.query_pointer(session.root).unwrap().reply().unwrap();
+    (p.root_x, p.root_y)
+}
+
+/// [G1]
+#[test]
+fn g1_a_tiled_window_trades_places_with_the_one_under_the_pointer() {
+    let session = mouse();
+    let apps = map(&session, 3);
+    eventually("tiled", || session.outer(apps[2].window) == (0, 400, 640, 400));
+    hold(&session, 1, (100, 600));
+    settle();
+    session.move_pointer(1000, 400);
+    eventually("now the master", || session.outer(apps[2].window) == (640, 0, 640, 800));
+    assert_eq!(session.outer(apps[0].window), (0, 400, 640, 400));
+    assert_eq!(session.outer(apps[1].window), (0, 0, 640, 400));
+    release(&session, 1);
+}
+
+/// [G1]
+#[test]
+fn g1_move_drags_the_clicked_window_even_if_it_cannot_take_the_focus() {
+    let session = mouse();
+    let spec = AppSpec { input: Some(false), ..AppSpec::at(0, 0, 200, 100) };
+    let inert = session.app(spec);
+    inert.map();
+    eventually("inert managed", || session.wm_state(inert.window).is_some());
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    eventually("tiled", || session.outer(inert.window) == (640, 0, 640, 800));
+    session.drag(SUPER, 1, (1000, 400), (300, 350));
+    eventually("inert in the stack", || session.outer(inert.window) == (0, 0, 640, 800));
+    assert_eq!(session.outer(a.window), (640, 0, 640, 800));
+}
+
+/// [G1]
+#[test]
+fn g1_a_floating_window_follows_the_pointer() {
+    let session = mouse();
+    let apps = map(&session, 2);
+    send(&session, Command::Toggle(State::Floating));
+    eventually("a alone in the layout", || session.outer(apps[0].window) == FULL);
+    let (x, y, w, h) = session.outer(apps[1].window);
+    let from = (x as i16 + 20, y as i16 + 20);
+    session.drag(SUPER, 1, from, (from.0 + 100, from.1 + 50));
+    eventually("moved", || session.outer(apps[1].window) == (x + 100, y + 50, w, h));
+}
+
+/// [G2]
+#[test]
+fn g2_a_floating_window_resizes_from_the_corner_nearest_the_pointer() {
+    let session = mouse();
+    let apps = map(&session, 2);
+    // Floating, centered at half the screen: away from its edges.
+    send(&session, Command::Center(Some(0.5)));
+    eventually("centered", || session.outer(apps[1].window) == (320, 200, 640, 400));
+    let (x, y, w, h) = session.outer(apps[1].window);
+    let (right, bottom) = (x + w as i32 - 1, y + h as i32 - 1);
+    // Near the top-left corner: the pointer goes there, the bottom-right one stays.
+    hold(&session, 3, (x as i16 + 10, y as i16 + 10));
+    eventually("pointer at the corner", || pointer(&session) == (x as i16, y as i16));
+    session.move_pointer(x as i16 - 50, y as i16 - 30);
+    eventually("resized", || session.outer(apps[1].window) == (x - 50, y - 30, w + 50, h + 30));
+    release(&session, 3);
+    // Near the bottom-right corner, from the new rectangle.
+    let (x, y, w, h) = session.outer(apps[1].window);
+    assert_eq!((x + w as i32 - 1, y + h as i32 - 1), (right, bottom));
+    hold(&session, 3, (right as i16 - 10, bottom as i16 - 10));
+    eventually("pointer at the corner", || pointer(&session) == (right as i16, bottom as i16));
+    session.move_pointer(right as i16 + 40, bottom as i16 + 20);
+    eventually("resized", || session.outer(apps[1].window) == (x, y, w + 40, h + 20));
+    release(&session, 3);
+}
+
+/// [G3]
+#[test]
+fn g3_resizing_a_stack_window_resizes_the_layout() {
+    let session = mouse();
+    let apps = map(&session, 3);
+    eventually("tiled", || session.outer(apps[2].window) == (0, 400, 640, 400));
+    // The first stack window: the pointer goes to its bottom edge, between the columns.
+    hold(&session, 3, (100, 100));
+    eventually("pointer on the edges", || pointer(&session) == (640, 400));
+    session.move_pointer(480, 600);
+    eventually("master wider", || session.outer(apps[0].window) == (480, 0, 800, 800));
+    eventually("edge moved", || session.outer(apps[1].window) == (0, 0, 480, 600));
+    assert_eq!(session.outer(apps[2].window), (0, 600, 480, 200));
+    release(&session, 3);
+    settle();
+    // Still tiled: a new window joins the stack beside them.
+    let d = session.app(AppSpec::at(0, 0, 200, 100));
+    d.map();
+    eventually("d in the stack", || session.outer(d.window).0 == 0);
+    assert_eq!(session.outer(apps[0].window), (480, 0, 800, 800));
+}
+
+/// [G3]
+#[test]
+fn g3_the_last_window_of_the_column_moves_its_top_edge() {
+    let session = mouse();
+    let apps = map(&session, 3);
+    eventually("tiled", || session.outer(apps[2].window) == (0, 400, 640, 400));
+    hold(&session, 3, (100, 600));
+    eventually("pointer on its top edge", || pointer(&session) == (640, 400));
+    session.move_pointer(640, 200);
+    eventually("edge moved", || session.outer(apps[2].window) == (0, 200, 640, 600));
+    assert_eq!(session.outer(apps[1].window), (0, 0, 640, 200));
+    release(&session, 3);
+}
+
+/// [G3]
+#[test]
+fn g3_the_master_sets_only_the_master_width() {
+    let session = mouse();
+    let apps = map(&session, 2);
+    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
+    hold(&session, 3, (1000, 100));
+    eventually("pointer at its middle", || pointer(&session) == (640, 400));
+    session.move_pointer(960, 100);
+    eventually("master narrower", || session.outer(apps[0].window) == (960, 0, 320, 800));
+    assert_eq!(session.outer(apps[1].window), (0, 0, 960, 800));
+    release(&session, 3);
+}
+
+/// [G3]
+#[test]
+fn g3_in_max_a_tiled_window_is_not_dragged() {
+    let layouts = vec![Layout::Max, Layout::Tile];
+    let session = Session::with_settings(Settings { layouts, ..mouse_settings() });
+    let apps = map(&session, 2);
+    eventually("full", || session.outer(apps[1].window) == FULL);
+    // No drag starts: the pointer stays where it was pressed.
+    hold(&session, 3, (100, 100));
+    settle();
+    assert_eq!(pointer(&session), (100, 100));
+    session.move_pointer(300, 300);
+    release(&session, 3);
+    session.drag(SUPER, 1, (100, 100), (300, 300));
+    settle();
+    assert_eq!(session.outer(apps[1].window), FULL);
+    // Neither the order nor the master width changed.
+    send(&session, Command::Layout(Choice::Next));
+    eventually("tiled", || session.outer(apps[1].window) == (0, 0, 640, 800));
+    assert_eq!(session.outer(apps[0].window), (640, 0, 640, 800));
 }
 
 /// [G1] and [G2]
@@ -408,23 +543,6 @@ fn y3_a_new_window_gets_an_average_share() {
     d.map();
     // Weights 1.1, 0.9 and 1.0: d gets a third of the column.
     eventually("d a third", || session.outer(d.window) == (0, 533, 640, 267));
-}
-
-/// [G1]
-#[test]
-fn g1_move_drags_the_clicked_window_even_if_it_cannot_take_the_focus() {
-    let session = mouse();
-    let spec = AppSpec { input: Some(false), ..AppSpec::at(0, 0, 200, 100) };
-    let inert = session.app(spec);
-    inert.map();
-    eventually("inert managed", || session.wm_state(inert.window).is_some());
-    let a = session.app(AppSpec::at(0, 0, 200, 100));
-    a.map();
-    eventually("a focused", || session.focus() == a.window);
-    eventually("tiled", || session.outer(inert.window) == (640, 0, 640, 800));
-    session.drag(SUPER, 1, (1000, 400), (900, 350));
-    eventually("inert moved", || session.outer(inert.window) == (540, -50, 640, 800));
-    assert_eq!(session.outer(a.window), FULL);
 }
 
 /// [W6]

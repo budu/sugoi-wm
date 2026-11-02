@@ -68,6 +68,12 @@ each section.
 
 ## Layouts
 
+- **Tiled drags resize the layout** (0.2 trial, user, 2026-11-01). 0.1 floated a
+  dragged tiled window, which the user found wrong: awesome's tile moves the pointer to
+  the edge between the columns and sets the master width and the window's height
+  factor, and its tiled move swaps. sugoi solves for the share that puts the window's
+  edge at the pointer with the others in proportion (awesome's `setwfact`), at once
+  rather than by awesome's feedback over motions.
 - **Crossings from sugoi's own moves are dropped** (M3). After an arrange or restack that
   moved something, a round trip, then every queued `EnterNotify` is dropped and the
   other events are kept for the loop. Otherwise each re-tile would hand the focus to

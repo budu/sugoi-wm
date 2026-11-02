@@ -132,6 +132,45 @@ pub fn grow_share(weights: &mut [f32], index: usize, delta: f32) {
     }
 }
 
+/// [G3] Sets share `index` so that its edge sits at `edge` (0 to 1 of the column): its
+/// bottom edge, or its top one for the last share; the others keep their proportions,
+/// so the shares above shrink or grow with the rest.
+pub fn share_to_edge(weights: &mut [f32], index: usize, edge: f32) {
+    let count = weights.len();
+    if count < 2 {
+        return;
+    }
+    let parts = spread(weights, 1.0);
+    let target = if index + 1 == count {
+        1.0 - edge
+    } else {
+        // The parts above scale by (1 - target) / (1 - part): solve top + target = edge.
+        let above: f32 = parts[..index].iter().sum();
+        let k = above / (1.0 - parts[index]);
+        (edge - k) / (1.0 - k)
+    };
+    grow_share(weights, index, target - parts[index]);
+}
+
+/// [G3] The master width that puts the edge between the columns at `x`.
+pub fn master_width_at(area: Rect, side: Side, x: i32) -> f32 {
+    let fraction = (x - area.x) as f32 / area.width as f32;
+    let width = match side {
+        Side::Left => fraction,
+        Side::Right => 1.0 - fraction,
+    };
+    width.clamp(MIN_FACTOR, MAX_FACTOR)
+}
+
+/// [G3] Where the edge between the columns is: also with one window, the master's alone.
+pub fn column_edge(area: Rect, master: Master) -> i32 {
+    let master_width = (area.width as f32 * master.width.clamp(MIN_FACTOR, MAX_FACTOR)).round();
+    match master.side {
+        Side::Left => area.x + master_width as i32,
+        Side::Right => area.x + area.width as i32 - master_width as i32,
+    }
+}
+
 /// [Y8] The window's position and inner size in `cell`, at least 1 px.
 pub fn inner(cell: Rect, border: u16) -> (i32, i32, u32, u32) {
     let border = 2 * u32::from(border);
@@ -167,6 +206,43 @@ mod tests {
     use super::*;
 
     const AREA: Rect = Rect { x: 0, y: 0, width: 1280, height: 800 };
+
+    #[test]
+    fn a_middle_share_puts_its_bottom_edge_at_the_pointer() {
+        let mut shares = [1.0, 1.0, 1.0];
+        share_to_edge(&mut shares, 1, 0.75);
+        let cells = tile(AREA, Master::default(), &shares);
+        let bottom = cells[2].y + cells[2].height as i32;
+        assert!((bottom - 600).abs() <= 1, "{cells:?}");
+        // The cell above keeps its proportion to the one below.
+        let (above, below) = (cells[1].height as f32, cells[3].height as f32);
+        assert!((above / below - 1.0).abs() < 0.01, "{cells:?}");
+    }
+
+    #[test]
+    fn the_last_share_puts_its_top_edge_at_the_pointer() {
+        let mut shares = [1.0, 1.0, 1.0];
+        share_to_edge(&mut shares, 2, 0.25);
+        let cells = tile(AREA, Master::default(), &shares);
+        assert!((cells[3].y - 200).abs() <= 1, "{cells:?}");
+    }
+
+    #[test]
+    fn edges_keep_the_shares_within_bounds() {
+        let mut shares = [1.0, 1.0];
+        share_to_edge(&mut shares, 0, 1.0);
+        let parts: Vec<f32> = shares.iter().map(|s| s / 2.0).collect();
+        assert!(parts.iter().all(|&p| p >= MIN_FACTOR - 1e-4), "{parts:?}");
+    }
+
+    #[test]
+    fn the_column_edge_follows_the_master_width() {
+        let master = Master::default();
+        assert_eq!(column_edge(AREA, master), 640);
+        assert!((master_width_at(AREA, Side::Right, 320) - 0.75).abs() < 1e-6);
+        assert!((master_width_at(AREA, Side::Left, 320) - 0.25).abs() < 1e-6);
+        assert_eq!(master_width_at(AREA, Side::Right, 1279), MIN_FACTOR);
+    }
 
     #[test]
     fn one_window_fills_the_area() {

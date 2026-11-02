@@ -9,6 +9,10 @@
 //!   the ratios of shares above it.
 //! - **Growing a share** ([Y3]): the grown share reaches its bounded target, the sum
 //!   stays, none goes below the floor, and the others keep their order.
+//! - **Edges** ([G3]): for any balanced weights, window and edge, the window's edge (its
+//!   bottom, its top for the last) moves toward the edge asked and never past it, reaches
+//!   it unless a share meets a bound, and the shares keep their sum and floor. The edge is
+//!   summed from the weights, not taken from `share_to_edge`.
 //! - **Workspace targets** ([V4], [V5]): every current workspace and every n, against a
 //!   table built from the spec's wording.
 
@@ -119,6 +123,39 @@ proptest! {
                 }
             }
         }
+    }
+}
+
+/// [G3] Where a share's edge is, as a fraction of the column.
+fn edge_of(shares: &[f32], index: usize) -> f32 {
+    let sum: f32 = shares.iter().sum();
+    let end = if index + 1 == shares.len() { index } else { index + 1 };
+    shares[..end].iter().sum::<f32>() / sum
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(cases(512)))]
+
+    #[test]
+    fn an_edge_moves_toward_the_pointer_and_reaches_it_within_bounds(
+        mut shares in weights(2, 8), index in 0usize..8, edge in 0.0f32..=1.0
+    ) {
+        let index = index % shares.len();
+        layout::balance(&mut shares);
+        let count = shares.len();
+        let old = edge_of(&shares, index);
+        layout::share_to_edge(&mut shares, index, edge);
+        let new = edge_of(&shares, index);
+        let parts: Vec<f32> = shares.iter().map(|s| s / count as f32).collect();
+        prop_assert!((parts.iter().sum::<f32>() - 1.0).abs() < EPSILON * count as f32);
+        prop_assert!(parts.iter().all(|&p| p >= MIN_FACTOR - EPSILON), "{:?}", parts);
+        // Toward the edge, never past it.
+        prop_assert!((new - edge).abs() <= (old - edge).abs() + EPSILON, "{old} {new} {edge}");
+        prop_assert!((new - old) * (edge - old) >= -EPSILON, "{old} {new} {edge}");
+        let most = (1.0 - MIN_FACTOR * (count - 1) as f32).min(MAX_FACTOR);
+        let bounded = parts.iter().any(|&p| p < MIN_FACTOR + EPSILON)
+            || parts[index] > most - EPSILON;
+        prop_assert!(bounded || (new - edge).abs() < 10.0 * EPSILON, "{old} {new} {edge}");
     }
 }
 
