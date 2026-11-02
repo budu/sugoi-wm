@@ -18,6 +18,12 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   history ([F5]) topmost first.
 - **[S3] Connection loss.** If the X connection closes, sugoi exits with status 1 and
   logs the cause.
+- **[S4] The root.** At startup the root window gets the arrow cursor (`left_ptr`)
+  from the Xcursor theme and size the X resources name (`Xcursor.theme`,
+  `Xcursor.size`, else from `Xft.dpi`), or X's cursor font without a theme; and a
+  black background, which X repaints where no window covers it, unless a wallpaper is
+  already set (`_XROOTPMAP_ID`, as `feh --bg-*` leaves). The wallpaper is the
+  session's: `contrib/sugoi-session` runs `~/.fehbg`.
 
 ## Managing
 

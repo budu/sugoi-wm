@@ -63,10 +63,12 @@ workspace; until then there is one of each.
 
 - **[G1] Move.** `move` in a button block starts dragging the clicked window, even one
   that cannot take the focus: it follows the pointer until the button is released. A
-  tiled, maximized or fullscreen window starts floating where it shows.
+  tiled, maximized or fullscreen window starts floating where it shows. The pointer
+  shows the move cursor (`fleur`) meanwhile.
 - **[G2] Resize.** `resize` in a button block resizes the clicked window from its
   bottom-right corner, where the pointer is moved, until the button is released, to at
-  least 1 px. A tiled window starts floating.
+  least 1 px. A tiled window starts floating. The pointer shows the corner cursor
+  (`bottom_right_corner`) meanwhile.
 
 ## Focus
 
