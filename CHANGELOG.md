@@ -2,40 +2,38 @@
 
 ## Unreleased
 
+- **Ready to share** (trial). A README, CONTRIBUTING and an agent guide; an MIT
+  license; a pinned toolchain; `scripts/gates`, `scripts/xephyr` (sugoi in a nested X
+  server) and `scripts/check-deps`. `doc/config.rb`, polybar, rofi and the session
+  script are generic examples now, without the author's own programs.
 - **The root** (trial). sugoi paints the root black unless a wallpaper is set, and
   gives it the arrow cursor from the Xcursor theme; drags show move and resize
   cursors. `contrib/sugoi-session` restores feh's wallpaper (`~/.fehbg`). See [S4] in
   `doc/spec/core.md`.
 - **polybar** (trial). The bar scales its fonts with `Xft.dpi` and is 44 px high.
 - **Widget popups** (trial). Clicking a widget opens `sugoi-popup`, a styled popup
-  under the pointer that the next click or key closes, instead of a notification; the
-  claude popup lists the Claude Code sessions again, as awesome's did. See
+  under the pointer that the next click or key closes, instead of a notification; a
+  popup can append several commands' output (`status --popup … --then …`). See
   `doc/spec/popup.md`.
-
 - **rofi** (trial). `contrib/rofi/` themes the app launcher and dmenu lists: dark,
   sugoi's magenta accent, rounded, a larger font at 192 DPI, app icons.
-
 - **Mouse drags as in awesome** (trial). In tile, Mod-right-drag on a tiled window
   resizes the layout (the master width and the window's edge) and Mod-drag swaps it
   with the window under the pointer; neither makes it float any more. A floating
   window resizes from its corner nearest the pointer. See [G1] to [G3] in
   `doc/spec/layouts.md`.
-
 - **Restarts keep everything** (trial). sugoi keeps its window order, focus history,
   floating windows and their geometry, minimized windows, stack shares, and each
   workspace's layout and master width in the root's `_SUGOI_STATE`, and restores them
   on start: the stack no longer comes back reversed. Adopted windows keep their
   stacking, and the focus goes to the last focused window when the pointer is over
   none. See [V11] in `doc/spec/workspaces.md`.
-
 - **A window list** (trial). Mod-w opens rofi's window mode: every window on every
   workspace, minimized ones included; picking one goes to it and restores it.
-
 - **Minimized windows** (trial). Mod-Shift-w lists the current workspace's minimized
   windows in rofi; picking one restores it. Windows gain `minimized?` and `activate`;
   key and button blocks can query `windows`, as hooks do, and every block, hook and
   request knows `current_workspace` ([H2], [H3]).
-
 - **Confirmations in rofi** (trial). Quit (Mod-Shift-e) and close (Mod-Shift-q) ask in
   a small rofi menu with the sugoi theme, "No" first, instead of dmenu.
 
