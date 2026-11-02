@@ -1,10 +1,11 @@
 #!/bin/sh
-# An X session for sugoi: what the awesome config started (lxpolkit), the bar and the
-# notification daemon, then sugoi. GDM starts it through contrib/sugoi.desktop, from
+# An X session for sugoi: the wallpaper, a polkit agent, the notification daemon and
+# the bar, then sugoi. GDM starts it through contrib/sugoi.desktop, from
 # outside the user's home, which GDM's own user cannot read (TryExec would fail and
 # hide the entry); scripts/install puts it in /usr/local/bin.
-# startx through ~/.xinitrc: exec ~/projects/sugoi-wm/contrib/sugoi-session
-# If sugoi cannot start (a Ruby upgrade, see contrib/sugoi-ruby.hook), awesome takes over.
+# startx through ~/.xinitrc: exec <this checkout>/contrib/sugoi-session
+# If sugoi cannot start (a Ruby upgrade, see contrib/sugoi-ruby.hook), another WM takes
+# over, so the session still opens.
 
 # GDM's session may not have cargo's binaries on PATH: sugoi, and sugoictl for the
 # config's confirmations.
@@ -13,6 +14,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # it, and paints the root black without one.
 [ -x "$HOME/.fehbg" ] && "$HOME/.fehbg"
 dunst &
-lxpolkit &
+command -v lxpolkit >/dev/null && lxpolkit &
 (sleep 1 && polybar sugoi) &
-sugoi || exec awesome
+sugoi && exit
+for wm in awesome i3 xterm; do
+    command -v "$wm" >/dev/null && exec "$wm"
+done

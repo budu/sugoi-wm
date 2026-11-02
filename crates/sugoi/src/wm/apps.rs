@@ -82,7 +82,7 @@ mod tests {
         ));
         assert!(!app_scope("/user.slice/user-1000.slice/user@1000.service/app.slice"));
         assert!(!app_scope("/user.slice/user-1000.slice/user@1000.service/session.slice/x.scope"));
-        let kitty_child = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-superkitty.slice/kitty-21404-5.scope";
+        let kitty_child = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-launcher.slice/kitty-21404-5.scope";
         assert!(app_scope(kitty_child));
     }
 

@@ -1,8 +1,8 @@
-/* rofi for sugoi: drun (Mod-p, the root's right click) and dmenu lists (superkitty).
- * Install: ln -s ~/projects/sugoi-wm/contrib/rofi ~/.config/rofi */
+/* rofi for sugoi: drun (Mod-p, the root's right click), the window lists and the
+ * confirmations of doc/config.rb. Install: copy this directory to ~/.config/rofi. */
 configuration {
     modi: "drun,run,window";
-    /* rofi 2 reads no X resources: Xft.dpi, by hand. */
+    /* rofi 2 reads no X resources: set your Xft.dpi here (xrdb -query). */
     dpi: 192;
     show-icons: true;
     icon-theme: "Adwaita";

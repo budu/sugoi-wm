@@ -1,12 +1,13 @@
-# sugoi config ported from ~/.config/awesome (doc/plans/0.1/parity.md).
-# Copy to ~/.config/sugoi/config.rb. Later milestones fill in what is missing.
+# An example sugoi config: copy it to ~/.config/sugoi/config.rb and make it yours.
+# It binds every action sugoi has; doc/spec/config.md and doc/spec/rules.md say what
+# each does. Programs it starts are examples: kitty, firefox, rofi, notify-send.
 
 require "shellwords"
 
 border width: 3, focused: "#aa007b", normal: "#000000"
 modkey "Mod4"
 
-# awesome's tile.left: the master on the right
+# Tile with the master on the right, as awesome's tile.left
 layouts :tile, :max, :float
 master side: :right, width: 0.5
 
@@ -27,19 +28,13 @@ def confirm(question, request)
 end
 key("Mod-Shift-e") { sh confirm("Quit?", "quit") }
 key("Mod-Shift-q") { sh confirm("Close?", "close") }
-key("Mod-Tab") { spawn "sh", "/home/budu/bin/toggle-xkbmap", name: "toggle_xkbmap" }
 
-# Programs, each in its own scope (app-<name>.slice)
-key("Mod-Return") { spawn "/usr/bin/kitty", name: "kitty" }
-key("Mod-Ctrl-Return") do
-  spawn "/usr/bin/bash", "-ic", "~/bin/superkitty", name: "superkitty"
-end
-key("Mod-d") { spawn "/usr/bin/thunar", name: "thunar" }
-key("Mod-e") { spawn "/usr/bin/emacs", name: "emacs" }
-key("Mod-i") { spawn "/home/budu/bin/chromium-launcher", name: "chromium" }
-key("Mod-b") { spawn "/usr/bin/firefox", name: "firefox" }
+# Programs, each in its own systemd scope (app-<name>.slice)
+key("Mod-Return") { spawn "kitty" }
+key("Mod-b") { spawn "firefox" }
 key("Mod-p") { spawn "rofi", "-show", "drun" }
-key("Mod-y") { sh "bash -ic 'overmind restart -s ~/cg/reservotron/.overmind.sock'" }
+# A program with resource limits for its scope
+key("Mod-Ctrl-Return") { spawn "kitty", name: "scratch", memory: "2G", cpu_weight: 50 }
 
 # Layouts
 key("Mod-space") { layout :next }
@@ -87,29 +82,24 @@ key("Mod-Escape") { workspace :back }
 root_button("4") { workspace :next }
 root_button("5") { workspace :previous }
 
-# Mouse
+# Mouse: in tile, a drag swaps a tiled window or resizes the layout ([G1] to [G3])
 button("Mod-1") { move }
 button("Mod-3") { resize }
 
-# Rules (rules.lua). Dialogs, transients, splash and utility windows float already.
-rule class: "Soffice", float: true, size: [2000, 1200], center: true
-rule class: %w[Caprine Thunar], float: true
-rule class: "feh", float: true, size: [2000, 1200], center: true
-rule class: %w[Emacs Cursor], master: true
+# The root window's menu
+root_button("3") { spawn "rofi", "-show", "drun" }
 
-# Float browser windows but the first one on a workspace
-BROWSERS = %w[Chromium firefox].freeze
+# Rules. Dialogs, transients, splash and utility windows float already.
+rule class: "feh", float: true, size: [1600, 1000], center: true
+rule class: "Emacs", master: true
+
+# A hook: a second browser window on a workspace floats, centered
 on(:manage) do |window|
-  next unless BROWSERS.include?(window.class_name)
+  next unless window.class_name == "firefox"
 
-  here = windows(workspace: window.workspace)
-  browsers = here.count { |w| BROWSERS.include?(w.class_name) }
+  browsers = windows(workspace: window.workspace).count { |w| w.class_name == "firefox" }
   if browsers > 1
-    window.float
-    window.size 3000, 1300
+    window.size 1600, 1000
     window.center
   end
 end
-
-# The root window's menu
-root_button("3") { spawn "rofi", "-show", "drun" }

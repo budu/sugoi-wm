@@ -260,8 +260,8 @@ fn d5_p1_spawn_and_sh_run_in_their_own_scope() {
         r#"
         key("Mod-x") do
           spawn "kitty"
-          spawn "bash", "-ic", "~/bin/superkitty", name: "superkitty"
-          sh "overmind restart"
+          spawn "bash", "-ic", "~/bin/launcher", name: "launcher"
+          sh "make restart"
         end
         "#,
     );
@@ -272,8 +272,8 @@ fn d5_p1_spawn_and_sh_run_in_their_own_scope() {
     logged.sort();
     let mut expected = [
         spawned("kitty", "kitty"),
-        spawned("superkitty", "bash -ic ~/bin/superkitty"),
-        spawned("sh", "sh -c overmind restart"),
+        spawned("launcher", "bash -ic ~/bin/launcher"),
+        spawned("sh", "sh -c make restart"),
     ];
     expected.sort();
     assert_eq!(logged, expected);
@@ -373,7 +373,7 @@ fn l2_the_example_config_loads() {
     let example = include_str!("../../../doc/config.rb");
     let mut session = Session::with_config(example);
     session.keys(&[SUPER, RETURN]);
-    eventually("kitty", || spawns(&mut session) == [spawned("kitty", "/usr/bin/kitty")]);
+    eventually("kitty", || spawns(&mut session) == [spawned("kitty", "kitty")]);
     assert!(notifications(&mut session).is_empty());
 }
 

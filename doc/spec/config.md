@@ -51,9 +51,9 @@ hooks (M5), spawn limits (M6).
     floating, maximized, fullscreen nor minimized) the cells stay: each takes the
     other's place and its share of the column ([Y3]).
   - `close` closes the focused window ([K1]); `kill` ends its whole app ([A4]).
-  - `spawn "kitty"` and `spawn "bash", "-ic", "~/bin/superkitty", name: "superkitty"`
+  - `spawn "kitty"` and `spawn "bash", "-ic", "~/bin/launcher", name: "launcher"`
     start a program ([P1]); `name` defaults to the basename of the first argument.
-  - `sh "overmind restart -s ~/x.sock"` is `spawn "sh", "-c", ...` named `sh`.
+  - `sh "make -C ~/src restart"` is `spawn "sh", "-c", ...` named `sh`.
   - `workspace 3`, `workspace :next`, `:previous` and `:back` switch workspaces
     ([V4] to [V6]); `move_to 3` moves the focused window ([V8]).
   - `reload` reloads the config ([L5]); `restart` replaces the sugoi process with a new
