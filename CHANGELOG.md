@@ -28,6 +28,9 @@
   stacking, and the focus goes to the last focused window when the pointer is over
   none. See [V11] in `doc/spec/workspaces.md`.
 
+- **A window list** (trial). Mod-w opens rofi's window mode: every window on every
+  workspace, minimized ones included; picking one goes to it and restores it.
+
 ## 0.1.0 (2026-11-01)
 
 The first release: an awesome replacement for one X11 monitor, configured in Ruby. See

@@ -53,6 +53,8 @@ key("Mod-t") { toggle :on_top }
 key("Mod-Ctrl-space") { toggle :floating }
 key("Mod-n") { minimize }
 key("Mod-Ctrl-n") { restore }
+# Every window, minimized ones too: picking one goes to it and restores it ([E8]).
+key("Mod-w") { spawn "rofi", "-show", "window" }
 
 # Workspaces: Mod-1 to Mod-0 by keycode, pressed again to cycle on to 11 to 30
 (1..10).each do |n|
