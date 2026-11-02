@@ -1,6 +1,10 @@
 #!/bin/sh
 # An X session for sugoi: what the awesome config started (lxpolkit), the bar and the
-# notification daemon, then sugoi. GDM starts it through contrib/sugoi.desktop;
+# notification daemon, then sugoi. GDM starts it through contrib/sugoi.desktop, from
+# outside the user's home, which GDM's own user cannot read (TryExec would fail and
+# hide the entry):
+#   sudo install -m755 contrib/sugoi-session /usr/local/bin/sugoi-session
+#   sudo cp contrib/sugoi.desktop /usr/share/xsessions/
 # startx through ~/.xinitrc: exec ~/projects/sugoi-wm/contrib/sugoi-session
 # If sugoi cannot start (a Ruby upgrade, see contrib/sugoi-ruby.hook), awesome takes over.
 
