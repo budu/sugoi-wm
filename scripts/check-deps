@@ -1,0 +1,36 @@
+#!/bin/sh
+# Checks what building, testing and running sugoi needs, and says what is missing.
+# Exits 1 when something required is.
+cd "$(dirname "$0")/.."
+missing=0
+check() { # check <required|optional> <what> <command...>
+    level=$1 what=$2
+    shift 2
+    if "$@" >/dev/null 2>&1; then
+        printf '  ok        %s\n' "$what"
+    elif [ "$level" = required ]; then
+        printf '  MISSING   %s\n' "$what"
+        missing=1
+    else
+        printf '  optional  %s\n' "$what"
+    fi
+}
+ruby=$(sed -n 's/^RUBY = "\(.*\)"$/\1/p' .cargo/config.toml)
+echo "Build"
+check required "rustup or cargo" command -v cargo
+check required "Ruby with a shared libruby at $ruby (.cargo/config.toml)" \
+    "$ruby" -e 'exit RbConfig::CONFIG["ENABLE_SHARED"] == "yes"'
+check required "pango, cairo, xkbcommon (pkg-config)" pkg-config --exists pango cairo xkbcommon
+echo "Test"
+check required "cargo-nextest (cargo install cargo-nextest --locked)" cargo nextest --version
+check required "Xvfb (xorg-server-xvfb)" command -v Xvfb
+check required "xterm (the kill cases' scopes)" command -v xterm
+check required "a systemd user session" systemctl --user show-environment
+echo "Run"
+check required "systemd-run" command -v systemd-run
+check optional "Xephyr (scripts/xephyr)" command -v Xephyr
+check optional "rofi (doc/config.rb's menus)" command -v rofi
+check optional "polybar (contrib/polybar)" command -v polybar
+check optional "dunst and notify-send (config errors)" command -v notify-send
+check optional "feh (the wallpaper)" command -v feh
+exit $missing

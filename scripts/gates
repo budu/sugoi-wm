@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs every quality gate of CONTRIBUTING.md, stopping at the first failure: the
+# formatting, the lints, then the whole suite (unit, contract and property tests) under
+# Xvfb. Arguments go to cargo nextest, e.g. `scripts/gates -E 'test(/v11/)'`.
+set -eu
+cd "$(dirname "$0")/.."
+step() {
+    printf '\n==> %s\n' "$*"
+    "$@"
+}
+step cargo fmt --check
+step cargo clippy --workspace --all-targets -- -D warnings
+step cargo nextest run --workspace "$@"
+printf '\nAll gates passed.\n'

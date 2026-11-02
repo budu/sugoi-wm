@@ -1,0 +1,28 @@
+#!/bin/sh
+# Runs this checkout's sugoi in a nested X server (Xephyr), to try a change without
+# leaving the session. Closing the Xephyr window ends it.
+#   scripts/xephyr [config.rb]      doc/config.rb by default
+# SUGOI_XEPHYR_SCREEN sets the size (1600x1000) and SUGOI_XEPHYR_DPI the X resources'
+# Xft.dpi (96). Apps it spawns open in the nested server, in their own scopes.
+set -eu
+cd "$(dirname "$0")/.."
+config=$(realpath "${1:-doc/config.rb}")
+cargo build -q -p sugoi -p sugoictl -p sugoi-popup
+fifo=$(mktemp -u)
+mkfifo "$fifo"
+Xephyr -br -ac -resizeable -displayfd 3 -screen "${SUGOI_XEPHYR_SCREEN:-1600x1000}" \
+    3>"$fifo" 2>/dev/null &
+xephyr=$!
+display=":$(head -n 1 "$fifo")"
+rm "$fifo"
+trap 'kill "$xephyr" 2>/dev/null' EXIT INT TERM
+echo "Xft.dpi: ${SUGOI_XEPHYR_DPI:-96}" | DISPLAY=$display xrdb -merge
+# A shell inside a sugoi session has SUGOI_SOCKET, which sugoictl prefers to DISPLAY.
+socket="${XDG_RUNTIME_DIR:-/tmp}/sugoi/${display#:}.sock"
+echo "xephyr: sugoi on $display with $config" >&2
+echo "xephyr: SUGOI_SOCKET=$socket sugoictl ..." >&2
+PATH="$PWD/target/debug:$PATH" DISPLAY=$display RUST_LOG=${RUST_LOG:-info} \
+    target/debug/sugoi --config "$config" &
+sugoi=$!
+wait "$xephyr" || true
+kill "$sugoi" 2>/dev/null || true
