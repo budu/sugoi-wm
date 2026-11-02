@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use sugoi::{Command, Direction, Goto, Layout, Settings};
+use sugoi::{Choice, Command, Direction, Effects, Goto, Layout, Matcher, Rule, Settings, State};
 use x11rb::protocol::xproto::*;
 
 fn session() -> Session {
@@ -187,7 +187,7 @@ fn v8_move_to_cycles_from_the_windows_workspace() {
     assert_eq!(current(&session), Some(2));
 }
 
-/// [V9]
+/// [V9] and [V11]
 #[test]
 fn v9_workspaces_survive_a_restart() {
     let mut session = session();
@@ -202,8 +202,11 @@ fn v9_workspaces_survive_a_restart() {
     session.start_wm_with(Settings::default());
     eventually("on 2", || current(&session) == Some(1));
     eventually("a hidden on 1", || !session.viewable(a.window));
-    assert!(session.viewable(b.window));
     assert_eq!(desktop(&session, a.window), Some(0));
+    // b stays minimized ([V11]), on 2.
+    assert!(!session.viewable(b.window));
+    send(&session, Command::Restore);
+    eventually("b shows on 2", || session.viewable(b.window));
 }
 
 /// Sets the `_NET_WM_DESKTOP` `app` asks for, then maps its window.
@@ -279,4 +282,194 @@ fn v2_a_withdrawal_racing_a_switch_unmanages_the_window() {
 fn v9_the_root_names_the_current_workspace_from_the_start() {
     let session = session();
     assert_eq!(current(&session), Some(0));
+}
+
+/// Quits sugoi and starts it again with `settings`, as a restart does.
+fn restart(session: &mut Session, settings: Settings) {
+    send(session, Command::Quit);
+    assert!(session.join().is_ok());
+    session.start_wm_with(settings);
+}
+
+fn outers(session: &Session, apps: &[&App]) -> Vec<(i32, i32, u32, u32)> {
+    apps.iter().map(|a| session.outer(a.window)).collect()
+}
+
+/// [V11]
+#[test]
+fn v11_a_restart_keeps_the_window_order() {
+    let mut session = session();
+    let (a, b, c) = (app(&session), app(&session), app(&session));
+    send(&session, Command::Swap(Direction::Previous));
+    let all = [&a, &b, &c];
+    eventually("c above b", || session.outer(c.window) == (0, 0, 640, 400));
+    let before = outers(&session, &all);
+    restart(&mut session, Settings::default());
+    eventually("the same places", || outers(&session, &all) == before);
+}
+
+/// [V11]
+#[test]
+fn v11_floating_windows_keep_their_state_geometry_and_stacking() {
+    let mut session = session();
+    let tiled = app(&session);
+    let a = app(&session);
+    send(&session, Command::Center(Some(0.5)));
+    let b = app(&session);
+    send(&session, Command::Center(Some(0.4)));
+    eventually("b floats", || session.outer(b.window) == (384, 240, 512, 320));
+    eventually("tiled alone", || session.outer(tiled.window) == (0, 0, 1280, 800));
+    assert!(session.above(b.window, a.window));
+    let all = [&tiled, &a, &b];
+    let before = outers(&session, &all);
+    restart(&mut session, Settings::default());
+    eventually("the same places", || outers(&session, &all) == before);
+    assert!(session.above(b.window, a.window));
+}
+
+/// [V11]
+#[test]
+fn v11_minimized_windows_stay_minimized() {
+    let mut session = session();
+    let a = app(&session);
+    let b = app(&session);
+    send(&session, Command::Minimize);
+    eventually("b minimized", || !session.viewable(b.window));
+    restart(&mut session, Settings::default());
+    eventually("a full", || session.outer(a.window) == (0, 0, 1280, 800));
+    assert!(!session.viewable(b.window));
+    assert_eq!(session.wm_state(b.window), Some(vec![3, 0]));
+    send(&session, Command::Restore);
+    eventually("b back", || session.viewable(b.window));
+}
+
+/// [V11]
+#[test]
+fn v11_layouts_widths_shares_and_back_survive() {
+    let layouts = || Settings { layouts: vec![Layout::Tile, Layout::Max], ..Settings::default() };
+    let mut session = Session::with_settings(layouts());
+    let (a, b, c) = (app(&session), app(&session), app(&session));
+    send(&session, Command::MasterWidth(0.1));
+    send(&session, Command::WindowHeight(0.1));
+    go(&session, Goto::Number(2));
+    eventually("on 2", || current(&session) == Some(1));
+    let (d, e) = (app(&session), app(&session));
+    send(&session, Command::Layout(Choice::Next));
+    eventually("max", || session.outer(d.window) == (0, 0, 1280, 800));
+    go(&session, Goto::Number(1));
+    eventually("on 1", || current(&session) == Some(0));
+    let all = [&a, &b, &c];
+    eventually("a wider", || session.outer(a.window).2 == 768);
+    let before = outers(&session, &all);
+    restart(&mut session, layouts());
+    eventually("the same places", || outers(&session, &all) == before);
+    go(&session, Goto::Back);
+    eventually("back on 2", || current(&session) == Some(1));
+    eventually("still max", || session.outer(e.window) == (0, 0, 1280, 800));
+    assert_eq!(session.outer(d.window), (0, 0, 1280, 800));
+}
+
+/// [V11] and [U6]
+#[test]
+fn v11_the_kept_state_wins_over_rules() {
+    let effects = Effects { float: Some(true), ..Effects::default() };
+    let class = Matcher { class: vec!["chat".into()], ..Matcher::default() };
+    let settings = || Settings {
+        rules: vec![Rule { matcher: class.clone(), effects: effects.clone() }],
+        ..Settings::default()
+    };
+    let mut session = Session::with_settings(settings());
+    let a = app(&session);
+    let chat = session.app(AppSpec::at(0, 0, 200, 100).class("chat", "chat"));
+    chat.map();
+    eventually("chat focused", || session.focus() == chat.window);
+    send(&session, Command::Toggle(State::Floating));
+    eventually("chat tiled", || session.outer(chat.window) == (0, 0, 640, 800));
+    restart(&mut session, settings());
+    eventually("a master", || session.outer(a.window) == (640, 0, 640, 800));
+    eventually("chat still tiled", || session.outer(chat.window) == (0, 0, 640, 800));
+}
+
+/// [V11] and [S2]
+#[test]
+fn v11_windows_the_state_does_not_name_come_after() {
+    let mut session = session();
+    let (a, b) = (app(&session), app(&session));
+    send(&session, Command::Quit);
+    assert!(session.join().is_ok());
+    // A window mapped while no WM runs: on top, so [S2] alone would put it first.
+    let late = session.app(AppSpec::at(0, 0, 200, 100));
+    late.map();
+    session.start_wm_with(Settings::default());
+    eventually("a still the master", || session.outer(a.window) == (640, 0, 640, 800));
+    eventually("late last", || session.outer(late.window) == (0, 400, 640, 400));
+    assert_eq!(session.outer(b.window), (0, 0, 640, 400));
+}
+
+/// [V11] and [Y7]
+#[test]
+fn v11_a_kept_layout_the_cycle_lacks_gives_way() {
+    let settings = Settings { layouts: vec![Layout::Max, Layout::Tile], ..Settings::default() };
+    let mut session = Session::with_settings(settings);
+    let (a, b) = (app(&session), app(&session));
+    eventually("max", || session.outer(a.window) == (0, 0, 1280, 800));
+    restart(&mut session, Settings { layouts: vec![Layout::Tile], ..Settings::default() });
+    eventually("tile", || session.outer(b.window) == (0, 0, 640, 800));
+}
+
+/// [V11]
+#[test]
+fn v11_a_change_just_before_a_quit_is_kept() {
+    let mut session = session();
+    let a = app(&session);
+    let b = app(&session);
+    // Both at once: sugoi handles the quit before it would next wait.
+    send(&session, Command::Minimize);
+    send(&session, Command::Quit);
+    assert!(session.join().is_ok());
+    session.start_wm_with(Settings::default());
+    eventually("a full", || session.outer(a.window) == (0, 0, 1280, 800));
+    assert!(!session.viewable(b.window));
+}
+
+/// [V11] and [W3]
+#[test]
+fn v11_a_maximized_window_restores_its_kept_geometry() {
+    let mut session = session();
+    let _tiled = app(&session);
+    let a = app(&session);
+    send(&session, Command::Center(Some(0.5)));
+    eventually("a floats", || session.outer(a.window) == (320, 200, 640, 400));
+    send(&session, Command::Toggle(State::Maximized));
+    eventually("maximized", || session.outer(a.window) == (0, 0, 1280, 800));
+    restart(&mut session, Settings::default());
+    eventually("adopted", || session.wm_state(a.window).is_some());
+    session.click(640, 400);
+    eventually("a focused", || session.focus() == a.window);
+    send(&session, Command::Toggle(State::Maximized));
+    eventually("back where it floated", || session.outer(a.window) == (320, 200, 640, 400));
+}
+
+/// [V11] and [V7]
+#[test]
+fn v11_the_focus_history_survives() {
+    let floating = || Settings { layouts: vec![Layout::Float], ..Settings::default() };
+    let mut session = Session::with_settings(floating());
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    let b = session.app(AppSpec::at(600, 0, 300, 200));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    // The pointer focuses a without raising it: b stays on top, a is focused last.
+    session.move_pointer(100, 100);
+    eventually("a focused again", || session.focus() == a.window);
+    session.move_pointer(1000, 700);
+    assert!(session.above(b.window, a.window));
+    restart(&mut session, floating());
+    eventually("adopted", || session.wm_state(b.window).is_some());
+    go(&session, Goto::Number(2));
+    eventually("on 2", || current(&session) == Some(1));
+    go(&session, Goto::Number(1));
+    eventually("a, focused last", || session.focus() == a.window);
 }

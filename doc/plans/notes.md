@@ -99,6 +99,14 @@ each section.
 
 ## Workspaces
 
+- **sugoi's state lives on the root** (0.2 trial, user, 2026-11-01). The window order
+  and the rest existed only in memory, so a restart rebuilt them from the stacking,
+  reversing the stack as awesome does. `_SUGOI_STATE` holds them as text (readable with
+  `xprop`), rewritten by difference before each wait and at exit, so it survives a
+  crash too. The stacking is X's own and is not saved: adoption had pushed windows
+  topmost first into a bottom-first list, which inverted floating windows. A stale
+  window ID in the state could match a new window that reused it while no WM ran; the
+  window would only get an order, a share or a floating flag.
 - **One rule for mapping** (M4). A window shows when it is on the current workspace and
   not minimized; `show` maps or unmaps to match, counting its unmaps, so minimize,
   switches and moves cannot disagree on a window's state.

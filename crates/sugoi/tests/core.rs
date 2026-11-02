@@ -19,6 +19,37 @@ fn s1_second_wm_exits_with_a_message() {
     assert_eq!(error.to_string(), expected);
 }
 
+/// [S2]
+#[test]
+fn s2_without_a_window_under_the_pointer_the_history_has_the_focus() {
+    let mut session = Session::without_wm();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(400, 0, 300, 200));
+    a.map();
+    b.map();
+    session.move_pointer(1000, 700);
+    session.start_wm();
+    // Adopted topmost first: b leads the history.
+    eventually("b focused", || session.focus() == b.window);
+}
+
+/// [S2]
+#[test]
+fn s2_adopted_windows_keep_their_stacking() {
+    let mut session = Session::without_wm();
+    let a = session.app(AppSpec::at(0, 0, 300, 200));
+    let b = session.app(AppSpec::at(100, 100, 300, 200));
+    let c = session.app(AppSpec::at(200, 50, 300, 200));
+    for app in [&a, &b, &c] {
+        app.map();
+    }
+    assert!(session.above(c.window, b.window) && session.above(b.window, a.window));
+    session.start_wm();
+    eventually("managed", || session.wm_state(a.window).is_some());
+    settle();
+    assert!(session.above(c.window, b.window) && session.above(b.window, a.window));
+}
+
 /// [S4]
 #[test]
 fn s4_the_root_gets_a_black_background_and_the_arrow_cursor() {

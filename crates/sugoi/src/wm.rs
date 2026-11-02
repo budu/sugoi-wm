@@ -6,6 +6,7 @@ mod ewmh;
 mod ipc;
 mod place;
 mod rules;
+mod state;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
@@ -85,6 +86,7 @@ x11rb::atom_manager! {
         _NET_WM_STRUT,
         _NET_WM_STRUT_PARTIAL,
         _XROOTPMAP_ID,
+        _SUGOI_STATE,
     }
 }
 
@@ -238,6 +240,8 @@ pub struct Wm {
     /// [W6] Minimized windows, the latest last.
     minimized: Vec<Window>,
     drag: Option<Drag>,
+    /// [V11] The state as last written.
+    saved_state: Option<String>,
     cursors: Cursors,
     /// [S4] The root's background without a wallpaper.
     black: u32,
@@ -368,6 +372,7 @@ impl Wm {
             stacked: Vec::new(),
             minimized: Vec::new(),
             drag: None,
+            saved_state: None,
             cursors,
             black,
             press: None,
@@ -403,6 +408,8 @@ impl Wm {
     pub fn run(mut self) -> Result<(), Error> {
         loop {
             if let Some(exit) = self.exit.take() {
+                // [V11] The state as it is now, whatever changed since the last wait.
+                self.save_state()?;
                 self.release_all()?;
                 // A round trip, so the server applies the restores before sugoi exits.
                 self.conn.sync().map_err(lost)?;
@@ -438,6 +445,7 @@ impl Wm {
                 continue;
             }
             self.publish()?;
+            self.save_state()?;
             self.conn.flush()?;
             let mut fds = vec![
                 PollFd::new(self.conn.stream(), PollFlags::IN),
@@ -727,6 +735,7 @@ impl Wm {
             // [V9] The root says which workspace is current from the start.
             None => self.set_current_desktop()?,
         }
+        let kept = self.read_state()?;
         let tree = self.conn.query_tree(self.root)?.reply().map_err(lost)?;
         let cookies = tree
             .children
@@ -745,13 +754,21 @@ impl Wm {
         for (window, attributes) in viewable.into_iter().rev() {
             self.manage_window(window, &attributes, false)?;
         }
+        // Raised last is stacked highest: the bottom window first.
+        self.stack.reverse();
+        if let Some(kept) = kept {
+            self.restore_state(kept);
+        }
         self.arrange()?;
         for window in self.order.clone() {
             self.show(window)?;
         }
         let pointer = self.conn.query_pointer(self.root)?.reply().map_err(lost)?;
+        let shown = self.history.iter().copied().find(|&w| self.visible(w));
         if self.clients.contains_key(&pointer.child) {
             self.focus(pointer.child, false)?;
+        } else if let Some(window) = shown {
+            self.focus(window, false)?;
         }
         Ok(())
     }

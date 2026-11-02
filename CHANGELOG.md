@@ -21,6 +21,13 @@
   window resizes from its corner nearest the pointer. See [G1] to [G3] in
   `doc/spec/layouts.md`.
 
+- **Restarts keep everything** (trial). sugoi keeps its window order, focus history,
+  floating windows and their geometry, minimized windows, stack shares, and each
+  workspace's layout and master width in the root's `_SUGOI_STATE`, and restores them
+  on start: the stack no longer comes back reversed. Adopted windows keep their
+  stacking, and the focus goes to the last focused window when the pointer is over
+  none. See [V11] in `doc/spec/workspaces.md`.
+
 ## 0.1.0 (2026-11-01)
 
 The first release: an awesome replacement for one X11 monitor, configured in Ruby. See

@@ -5,7 +5,8 @@
 //! a rule sends to workspace 2 or one a rule floats ([U2], [U3], [U7]), each maybe
 //! asking for workspace 1, 2, 3 or an invalid one, by property or message ([V10]), close
 //! one, `workspace` 1 to 3, which cycle on to 11 to 23, `move_to` 1 to 3, back, next,
-//! previous, minimize, restore, focus next, next layout), on at most 6 windows, so
+//! previous, minimize, restore, focus next, next layout, and a restart: a quit, then a
+//! start, after which every shown window is where it was, [V11]), on at most 6 windows, so
 //! cycling, emptied workspaces and minimized windows on hidden workspaces collide often.
 //!
 //! Checked after every operation, against a reference model written from the specs:
@@ -74,6 +75,8 @@ enum Op {
     Restore,
     FocusNext,
     LayoutNext,
+    /// [V11] Quit, then start again.
+    Restart,
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -95,6 +98,7 @@ fn op() -> impl Strategy<Value = Op> {
         2 => Just(Op::Restore),
         2 => Just(Op::FocusNext),
         1 => Just(Op::LayoutNext),
+        1 => Just(Op::Restart),
     ]
 }
 
@@ -472,6 +476,21 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                     };
                     expected_focus = Some(Some(next));
                 }
+            }
+            Op::Restart => {
+                let shown: Vec<Window> =
+                    model.windows.iter().filter(|w| model.shown(w)).map(|w| w.window).collect();
+                let places =
+                    |run: &Run| -> Vec<_> { shown.iter().map(|&w| run.session.outer(w)).collect() };
+                let before = places(&run);
+                assert!(run.session.send(Command::Quit));
+                run.session.join().map_err(|e| TestCaseError::fail(e.to_string()))?;
+                run.session.start_wm_with(settings());
+                run.barrier();
+                // [V11] Nothing moved: the same windows in the same places.
+                let after = places(&run);
+                prop_assert_eq!(&before, &after, "a restart moved windows, step {}", step);
+                // [S2] The pointer's window, or the history's: some shown window.
             }
             Op::LayoutNext => {
                 run.keys(&[SUPER, SPACE]);
