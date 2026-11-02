@@ -18,9 +18,12 @@ key("Mod-Shift-k") { swap :next }
 
 # Session
 key("Mod-Ctrl-r") { reload }
-# Asked with dmenu, as awesome did; sugoictl (on PATH) carries the answer out
+# Asked with rofi (No first, no text entry); sugoictl (on PATH) carries the answer out
 def confirm(question, request)
-  "printf 'No\\nYes' | dmenu -p #{question} | grep -qx Yes && sugoictl #{request}"
+  theme = "window { width: 16%; } listview { lines: 2; } inputbar { children: [prompt]; }"
+  rofi = "rofi -dmenu -i -no-custom -no-show-icons -p #{question.shellescape} " \
+         "-theme-str #{theme.shellescape}"
+  "printf 'No\\nYes' | #{rofi} | grep -qx Yes && sugoictl #{request}"
 end
 key("Mod-Shift-e") { sh confirm("Quit?", "quit") }
 key("Mod-Shift-q") { sh confirm("Close?", "close") }

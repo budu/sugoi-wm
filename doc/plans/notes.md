@@ -162,7 +162,8 @@ each section.
 - **sugoictl is a library too** (M7): the socket path and the protocol live in it, sugoi
   uses them, and sugoictl itself links no libruby.
 - **Confirmations are config, not sugoi** (M7): dmenu asks, `sugoictl quit` or `close`
-  answers; a block could not wait on dmenu within its 1 s.
+  answers; a block could not wait on dmenu within its 1 s. Since the 0.2 trial (user,
+  2026-11-02), rofi asks, in the sugoi theme: "No" first, no text entry.
 - **The widgets keep their scripts** (M7): one wrapper turns their first line into a
   polybar label and the rest into a dunst notification on click.
 - **polybar as the bar** (user, 2026-10-31). It covers workspaces, the title and the
