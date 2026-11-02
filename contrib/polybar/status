@@ -1,13 +1,46 @@
-#!/bin/sh
+#!/bin/bash
 # A polybar module for the awesome widgets' status scripts, whose first line is
 # "<text> <severity>" and the rest a popup ("@@POPUP@@" then Pango markup).
 #   status <icon> <command...>          the label, colored by severity
-#   status --popup <command...>         the popup, through notify-send (dunst)
+#   status --popup <command...> [--then <command...>]...
+#                                       the popup, through sugoi-popup ([O4]); each
+#                                       --then command's whole output follows
 set -u
-if [ "${1:-}" = --popup ]; then
+if [[ ${1:-} == --popup ]]; then
     shift
-    body=$("$@" 2>&1 | tail -n +2 | sed '1{/^@@POPUP@@$/d}')
-    exec notify-send --app-name=sugoi "$(basename "$1")" "$body"
+    # One command's part of the popup, or its error; $1 says whether to drop the label.
+    section() {
+        local drop=$1 err out
+        shift
+        err=$(mktemp)
+        if out=$("$@" 2>"$err"); then
+            if [[ $drop == yes ]]; then
+                printf '%s\n' "$out" | tail -n +2 | sed '1{/^@@POPUP@@$/d}'
+            else
+                printf '%s\n' "$out"
+            fi
+        else
+            printf '<span foreground="#f7768e"><b>%s failed</b>\n' "$(basename "$1")"
+            sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' "$err"
+            printf '</span>\n'
+        fi
+        rm -f "$err"
+    }
+    drop=yes
+    command=()
+    for arg in "$@" --then; do
+        if [[ $arg != --then ]]; then
+            command+=("$arg")
+            continue
+        fi
+        if ((${#command[@]})); then
+            [[ $drop == no ]] && echo
+            section "$drop" "${command[@]}"
+            drop=no
+        fi
+        command=()
+    done | sugoi-popup
+    exit
 fi
 icon=$1
 shift

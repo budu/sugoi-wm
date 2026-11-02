@@ -1,11 +1,12 @@
 #!/bin/sh
-# Installs sugoi from this checkout: sugoi and sugoictl into ~/.cargo/bin, then, through
-# sudo, the session script, the GDM entry and the pacman hook (contrib/). Run it again
-# after pulling or switching branches; `--no-system` skips the sudo part.
+# Installs sugoi from this checkout: sugoi, sugoictl and sugoi-popup into ~/.cargo/bin,
+# then, through sudo, the session script, the GDM entry and the pacman hook (contrib/).
+# Run it again after pulling or switching branches; `--no-system` skips the sudo part.
 set -eu
 cd "$(dirname "$0")/.."
 cargo install --locked --path crates/sugoi
 cargo install --locked --path crates/sugoictl
+cargo install --locked --path crates/sugoi-popup
 [ "${1:-}" = --no-system ] && exit 0
 sudo install -Dm755 contrib/sugoi-session /usr/local/bin/sugoi-session
 sudo install -Dm644 contrib/sugoi.desktop /usr/share/xsessions/sugoi.desktop

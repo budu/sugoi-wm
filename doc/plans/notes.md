@@ -137,6 +137,11 @@ each section.
 - **Cursors from the X resources** (0.2 trial). x11rb's cursor loader reads the theme
   and size from `Xcursor.*`, else sizes from `Xft.dpi`, as Xlib clients do; it falls
   back to X's cursor font, so a missing theme still replaces X's cross.
+- **Widget popups are their own program** (0.2 trial, user, 2026-11-01). Notifications
+  time out, stack and fill the history; `sugoi-popup` draws awesome's popup (x11rb,
+  Pango and Cairo, as awesome draws) from the widgets' scripts, outside the WM. It
+  holds the pointer and keyboard, so the click that closes it goes nowhere else. Ruby
+  widgets (a bar of its own) stay a question for the 0.2 plan.
 - **Requests are Ruby** (M7). One socket verb does all: actions, queries and anything
   the config can do, with the 1 s limit; the user is the socket's only client
   (0600), so it opens nothing the config does not already.

@@ -7,6 +7,10 @@
   cursors. `contrib/sugoi-session` restores feh's wallpaper (`~/.fehbg`). See [S4] in
   `doc/spec/core.md`.
 - **polybar** (trial). The bar scales its fonts with `Xft.dpi` and is 44 px high.
+- **Widget popups** (trial). Clicking a widget opens `sugoi-popup`, a styled popup
+  under the pointer that the next click or key closes, instead of a notification; the
+  claude popup lists the Claude Code sessions again, as awesome's did. See
+  `doc/spec/popup.md`.
 
 ## 0.1.0 (2026-11-01)
 
