@@ -31,7 +31,8 @@ releases and what changed.
 
 It does not do multiple monitors, Wayland, compositing, titlebars or widgets; external
 programs draw the bar, menus and notifications. `contrib/` has the author's setup:
-polybar, rofi, a session script and a small popup for bar widgets.
+polybar, rofi and dunst in one theme, a session script, and a small popup for bar
+widgets.
 
 ## Install
 
@@ -49,8 +50,9 @@ cp doc/config.rb ~/.config/sugoi/config.rb
 
 Pick "sugoi" at the login screen, or run `contrib/sugoi-session` from `~/.xinitrc`. The
 session script restores the [feh] wallpaper, starts [dunst], polybar and sugoi, and
-falls back to another window manager if sugoi cannot start. To use the bar and the
-menus as they are, copy `contrib/polybar` and `contrib/rofi` to `~/.config/`.
+falls back to another window manager if sugoi cannot start. To use the bar, the menus
+and the notifications as they are, copy `contrib/polybar`, `contrib/rofi` and
+`contrib/dunst` to `~/.config/`.
 
 ## Configure
 
@@ -122,7 +124,7 @@ those numbers.
 | `doc/spec/`            | The specification                                            |
 | `doc/config.rb`        | The example config, which a test loads                       |
 | `doc/plans/`           | Plans, logs and reports, and the implementation notes        |
-| `contrib/`             | The session script, GDM entry, polybar, rofi, a pacman hook  |
+| `contrib/`             | Session, GDM entry, polybar, rofi, dunst, a pacman hook      |
 | `scripts/`             | Developer scripts                                            |
 
 ### Build and test

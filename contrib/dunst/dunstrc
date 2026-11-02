@@ -1,0 +1,57 @@
+# dunst for sugoi: the rofi theme's colors (contrib/rofi/sugoi.rasi), sugoi's magenta
+# frame, under the bar. Install: copy this directory to ~/.config/dunst, then
+# `dunstctl reload`. Sizes are at 96 DPI, times `scale`.
+
+[global]
+    # Xft.dpi / 96: 2 at 192 DPI. dunst's automatic scale (0) reads the monitor's
+    # physical DPI, not Xft.dpi, as rofi needs its dpi by hand (contrib/rofi).
+    scale = 2
+    follow = none
+    origin = top-right
+    # Below a 22 px bar at 96 DPI (contrib/polybar), with a gap.
+    offset = (12, 30)
+    width = (240, 360)
+    height = (0, 300)
+    notification_limit = 5
+    gap_size = 8
+    padding = 12
+    horizontal_padding = 14
+    text_icon_padding = 12
+    frame_width = 1
+    corner_radius = 10
+    separator_color = frame
+    # The scale leaves fonts alone: 6 at 96 DPI, 12 at 192.
+    font = Noto Sans 12
+    markup = full
+    format = "<b>%s</b>\n%b"
+    alignment = left
+    icon_position = left
+    # Icons by name from the theme, as apps send them (notify-send -i).
+    enable_recursive_icon_lookup = true
+    icon_theme = Adwaita
+    # Icons are not scaled either: 24 to 32 at 96 DPI.
+    min_icon_size = 48
+    max_icon_size = 64
+    progress_bar_frame_width = 0
+    progress_bar_corner_radius = 4
+    highlight = "#aa007b"
+    mouse_left_click = do_action, close_current
+    mouse_right_click = close_all
+
+[urgency_low]
+    background = "#0f0f14"
+    foreground = "#6e6e7e"
+    frame_color = "#2b1026"
+    timeout = 5
+
+[urgency_normal]
+    background = "#0f0f14"
+    foreground = "#c8c8d2"
+    frame_color = "#aa007b"
+    timeout = 8
+
+[urgency_critical]
+    background = "#0f0f14"
+    foreground = "#f2f2f7"
+    frame_color = "#f7768e"
+    timeout = 0
