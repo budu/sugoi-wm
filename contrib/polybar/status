@@ -1,7 +1,9 @@
 #!/bin/bash
 # A polybar module for the awesome widgets' status scripts, whose first line is
 # "<text> <severity>" and the rest a popup ("@@POPUP@@" then Pango markup).
-#   status <icon> <command...>          the label, colored by severity
+#   status <icon> [--unit <text>] <command...>
+#                                       the label, colored by severity, with the unit
+#                                       after the text (`--unit %` for a percentage)
 #   status --popup <command...> [--then <command...>]...
 #                                       the popup, through sugoi-popup ([O4]); each
 #                                       --then command's whole output follows
@@ -44,6 +46,11 @@ if [[ ${1:-} == --popup ]]; then
 fi
 icon=$1
 shift
+unit=''
+if [[ ${1:-} == --unit ]]; then
+    unit=$2
+    shift 2
+fi
 if ! first=$("$@" 2>/dev/null | head -n 1) || [ -z "$first" ]; then
     printf '%%{F#f7768e}%s !%%{F-}\n' "$icon"
     exit 0
@@ -56,7 +63,7 @@ case $severity in
     *) color='' ;;
 esac
 if [ -n "$color" ]; then
-    printf '%s %%{F%s}%s%%{F-}\n' "$icon" "$color" "$text"
+    printf '%s %%{F%s}%s%s%%{F-}\n' "$icon" "$color" "$text" "$unit"
 else
-    printf '%s %s\n' "$icon" "$text"
+    printf '%s %s%s\n' "$icon" "$text" "$unit"
 fi

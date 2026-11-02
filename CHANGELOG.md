@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Units in status modules** (trial). `contrib/polybar/status <icon> --unit % …` shows
+  a percentage with its sign, colored with the number, as awesome's widgets did.
 - **dunst** (trial). `contrib/dunst/` styles notifications as the rofi theme: dark,
   sugoi's magenta frame, rounded, under the bar, red for critical ones. Notifications
   and rofi take their icons from Papirus-Dark (`papirus-icon-theme`).
