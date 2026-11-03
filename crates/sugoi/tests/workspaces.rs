@@ -103,18 +103,30 @@ fn v3_each_workspace_has_its_own_layout() {
 
 /// [V4]
 #[test]
-fn v4_repeating_a_number_cycles_through_its_bank() {
+fn v4_repeating_a_number_cycles_through_its_used_stacked_workspaces() {
     let session = session();
-    for expected in [2, 12, 22, 2] {
+    // A window on 23, none on 13.
+    go(&session, Goto::Number(23));
+    eventually("23", || current(&session) == Some(22));
+    // Kept: dropping an App destroys its window.
+    let _on_23 = app(&session);
+    go(&session, Goto::Number(3));
+    eventually("3 from outside", || current(&session) == Some(2));
+    for expected in [22, 2, 22] {
         go(&session, Goto::Number(3));
-        eventually("cycled", || current(&session) == Some(expected));
+        eventually("cycled past the empty 13", || current(&session) == Some(expected));
     }
+    // Nothing on 15 or 25: 5 stays.
     go(&session, Goto::Number(5));
     eventually("5", || current(&session) == Some(4));
+    go(&session, Goto::Number(5));
+    settle();
+    assert_eq!(current(&session), Some(4));
+    // 17 directly, empty; from it, 27 is empty too, so 7 counts.
     go(&session, Goto::Number(17));
     eventually("17 directly", || current(&session) == Some(16));
     go(&session, Goto::Number(7));
-    eventually("7 from 17", || current(&session) == Some(26));
+    eventually("7 from 17", || current(&session) == Some(6));
 }
 
 /// [V5]
@@ -179,12 +191,26 @@ fn v8_move_to_hides_the_window_and_stays() {
 #[test]
 fn v8_move_to_cycles_from_the_windows_workspace() {
     let session = session();
+    go(&session, Goto::Number(23));
+    eventually("23", || current(&session) == Some(22));
+    // Kept: dropping an App destroys its window.
+    let _on_23 = app(&session);
     go(&session, Goto::Number(3));
     eventually("3", || current(&session) == Some(2));
     let a = app(&session);
+    // 13 is empty: a goes on to 23.
     send(&session, Command::MoveTo(3));
-    eventually("a on 13", || desktop(&session, a.window) == Some(12));
+    eventually("a on 23", || desktop(&session, a.window) == Some(22));
     assert_eq!(current(&session), Some(2));
+    // Alone on 3 with nothing else used, a window stays.
+    let b = app(&session);
+    go(&session, Goto::Number(4));
+    eventually("4", || current(&session) == Some(3));
+    let c = app(&session);
+    send(&session, Command::MoveTo(4));
+    settle();
+    assert_eq!(desktop(&session, c.window), Some(3));
+    assert_eq!(desktop(&session, b.window), Some(2));
 }
 
 /// [V9] and [V11]

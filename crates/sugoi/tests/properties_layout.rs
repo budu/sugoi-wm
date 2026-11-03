@@ -13,8 +13,8 @@
 //!   bottom, its top for the last) moves toward the edge asked and never past it, reaches
 //!   it unless a share meets a bound, and the shares keep their sum and floor. The edge is
 //!   summed from the weights, not taken from `share_to_edge`.
-//! - **Workspace targets** ([V4], [V5]): every current workspace and every n, against a
-//!   table built from the spec's wording.
+//! - **Workspace targets** ([V4], [V5]): for generated occupancies, every current
+//!   workspace and every n, against a reading of the spec's wording.
 
 mod common;
 
@@ -160,29 +160,49 @@ proptest! {
 }
 
 /// The spec's [V4] and [V5], word for word: n's class is n, n+10 and n+20; from a
-/// workspace in the class, the next in that order, wrapping; from outside it, n.
-fn spec_target(current: usize, n: u32) -> Option<usize> {
+/// workspace in the class, the next in that order, wrapping, that holds a window or is
+/// n; none, and it stays; from outside the class, n. Workspaces numbered 1 to 30.
+fn spec_target(current: usize, n: u32, used: &[bool; 30]) -> Option<usize> {
     let current = current + 1;
+    let n = n as usize;
     match n {
         1..=10 => {
-            let class = [n as usize, n as usize + 10, n as usize + 20];
+            let class = [n, n + 10, n + 20];
             let goes = match class.iter().position(|&w| w == current) {
-                Some(i) => class[(i + 1) % 3],
-                None => n as usize,
+                Some(i) => (1..=2)
+                    .map(|k| class[(i + k) % 3])
+                    .find(|&w| w == n || used[w - 1])
+                    .unwrap_or(current),
+                None => n,
             };
             Some(goes - 1)
         }
-        11..=30 => Some(n as usize - 1),
+        11..=30 => Some(n - 1),
         _ => None,
     }
 }
 
-#[test]
-fn every_workspace_target_matches_the_spec() {
-    for current in 0..workspace::COUNT {
-        for n in 0..=40 {
-            assert_eq!(workspace::target(current, n), spec_target(current, n), "{current} {n}");
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(cases(256)))]
+
+    // Any occupancy, mostly sparse so empty stacked workspaces are common; every
+    // current workspace and every n.
+    #[test]
+    fn every_workspace_target_matches_the_spec(
+        used in prop::array::uniform30(prop::bool::weighted(0.3))
+    ) {
+        for current in 0..workspace::COUNT {
+            for n in 0..=40 {
+                let target = workspace::target(current, n, |w| used[w]);
+                prop_assert_eq!(target, spec_target(current, n, &used), "{} {}", current, n);
+            }
         }
+    }
+}
+
+#[test]
+fn next_and_previous_wrap() {
+    for current in 0..workspace::COUNT {
         let next = if current == 29 { 0 } else { current + 1 };
         let previous = if current == 0 { 29 } else { current - 1 };
         assert_eq!(workspace::step(current, true), next);

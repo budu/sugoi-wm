@@ -71,10 +71,31 @@ key("Mod-Shift-w") do
   end
 end
 
-# Workspaces: Mod-1 to Mod-0 by keycode, pressed again to cycle on to 11 to 30
+# Workspaces: Mod-1 to Mod-0 by keycode, pressed again to cycle on to the stacked ones
+# that hold a window (n+10, n+20, [V4]); Mod-Ctrl-n opens a new stacked workspace, and
+# Mod-Ctrl-Shift-n moves the focused window to one, following it.
+def free_workspace(n)
+  [n + 10, n + 20].find { |w| windows(workspace: w).empty? }
+end
+
+def no_free_workspace(n) = sh("notify-send sugoi 'No free workspace for #{n}'")
+
 (1..10).each do |n|
   key("Mod-##{9 + n}") { workspace n }
   key("Mod-Shift-##{9 + n}") { move_to n }
+  key("Mod-Ctrl-##{9 + n}") do
+    free = free_workspace(n)
+    free ? workspace(free) : no_free_workspace(n)
+  end
+  key("Mod-Ctrl-Shift-##{9 + n}") do
+    free = free_workspace(n)
+    if free
+      move_to free
+      workspace free
+    else
+      no_free_workspace(n)
+    end
+  end
 end
 key("Mod-Left") { workspace :previous }
 key("Mod-Right") { workspace :next }

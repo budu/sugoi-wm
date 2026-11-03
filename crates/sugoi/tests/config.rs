@@ -377,6 +377,50 @@ fn l2_the_example_config_loads() {
     assert!(notifications(&mut session).is_empty());
 }
 
+/// [V4] The example config's stacked workspaces: Mod-Ctrl-3 opens 13, Mod-3 cycles
+/// through the used ones, Mod-Ctrl-Shift-3 moves a window to a new one, and with none
+/// free it says so.
+#[test]
+fn v4_the_example_config_opens_and_cycles_stacked_workspaces() {
+    let example = include_str!("../../../doc/config.rb");
+    let mut session = Session::with_config(example);
+    let current = |session: &Session| {
+        let atom = session.atom("_NET_CURRENT_DESKTOP");
+        let reply = session.conn.get_property(false, session.root, atom, AtomEnum::CARDINAL, 0, 1);
+        reply.unwrap().reply().unwrap().value32().and_then(|mut v| v.next())
+    };
+    let three = ONE + 2;
+    let a = session.app(AppSpec::at(0, 0, 200, 100));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, CTRL, three]);
+    eventually("on a new 13", || current(&session) == Some(12));
+    let b = session.app(AppSpec::at(0, 0, 200, 100));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    // 23 is empty: from 13, Mod-3 goes back to 3, then to 13 again.
+    session.keys(&[SUPER, three]);
+    eventually("back on 3", || current(&session) == Some(2));
+    session.keys(&[SUPER, three]);
+    eventually("on 13", || current(&session) == Some(12));
+    // b moves to a new 23, and the focus follows it there.
+    session.keys(&[SUPER, CTRL, SHIFT, three]);
+    eventually("on 23 with b", || current(&session) == Some(22));
+    eventually("b focused there", || session.focus() == b.window);
+    // 13 is empty again and 23 is used: one is free.
+    session.keys(&[SUPER, CTRL, three]);
+    eventually("on 13", || current(&session) == Some(12));
+    let c = session.app(AppSpec::at(0, 0, 200, 100));
+    c.map();
+    eventually("c focused", || session.focus() == c.window);
+    session.keys(&[SUPER, CTRL, three]);
+    // `sh` goes through systemd-run, whose stub logs the command.
+    eventually("none free", || {
+        spawns(&mut session).iter().any(|s| s.contains("No free workspace for 3"))
+    });
+    assert_eq!(current(&session), Some(12));
+}
+
 /// [D6]
 #[test]
 fn d6_root_buttons_leave_the_windows_their_clicks() {

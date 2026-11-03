@@ -18,7 +18,8 @@ releases and what changed.
   others stacked beside it. Mouse drags resize the layout or swap windows, as awesome's
   do; floating windows move and resize from any corner.
 - **30 workspaces in 3 banks.** Mod-1 to Mod-0 go to workspaces 1 to 10; pressing the
-  same key again cycles on to n+10 and n+20.
+  same key again cycles through the stacked ones in use (n+10, n+20), and Mod-Ctrl-n
+  opens a new one.
 - **A Ruby configuration.** Keys, buttons, rules and hooks in
   `~/.config/sugoi/config.rb`, run by an embedded CRuby. A broken config never breaks
   the session: sugoi keeps the last one that loaded and says why.

@@ -170,15 +170,20 @@ struct Reference {
 }
 
 /// [V4], from the spec's words: n's class is n, n+10, n+20; from inside it the next one
-/// in that order, wrapping; from outside, n; 11 to 30 are exact.
-fn spec_target(current: usize, n: u32) -> usize {
+/// in that order, wrapping, that holds a modeled window (minimized ones too) or is n,
+/// else the current one; from outside, n; 11 to 30 are exact. Indices 0 to 29.
+fn spec_target(current: usize, n: u32, model: &Reference) -> usize {
     let n = n as usize;
     if n > 10 {
         return n - 1;
     }
+    let used = |w: usize| model.windows.iter().any(|m| m.workspace + 1 == w);
     let class = [n, n + 10, n + 20];
     match class.iter().position(|&w| w == current + 1) {
-        Some(i) => class[(i + 1) % 3] - 1,
+        Some(i) => {
+            (1..=2).map(|k| class[(i + k) % 3]).find(|&w| w == n || used(w)).unwrap_or(current + 1)
+                - 1
+        }
         None => n - 1,
     }
 }
@@ -406,11 +411,16 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                     conn.ungrab_server().unwrap();
                 }
                 conn.sync().unwrap();
+                // sugoi takes the key first, while the window still counts ([V4]).
+                let goes = match op {
+                    Op::WithdrawSwitching(_, n) => Some(spec_target(model.current, n, &model)),
+                    _ => None,
+                };
                 model.windows.retain(|w| w.window != app.window);
                 model.history.retain(|&w| w != app.window);
                 model.withdrawn.push(app.window);
-                if let Op::WithdrawSwitching(_, n) = op
-                    && model.switch(spec_target(model.current, n))
+                if let Some(goes) = goes
+                    && model.switch(goes)
                 {
                     expected_focus = Some(model.switch_focus());
                 }
@@ -418,7 +428,7 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
             }
             Op::Workspace(n) => {
                 run.keys(&[SUPER, 9 + n as u8]);
-                if model.switch(spec_target(model.current, n)) {
+                if model.switch(spec_target(model.current, n, &model)) {
                     expected_focus = Some(model.switch_focus());
                 }
             }
@@ -426,7 +436,7 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                 run.keys(&[SUPER, SHIFT, 9 + n as u8]);
                 if let Some(w) = model.windows.iter().position(|w| w.window == focused) {
                     let from = model.windows[w].workspace;
-                    model.windows[w].workspace = spec_target(from, n);
+                    model.windows[w].workspace = spec_target(from, n, &model);
                 }
             }
             Op::Back => {

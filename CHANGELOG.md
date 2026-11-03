@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Stacked workspaces in use** (trial). Repeating Mod-n cycles through n and the
+  stacked workspaces that hold a window, skipping empty ones; Mod-Ctrl-n opens a new
+  stacked workspace, and Mod-Ctrl-Shift-n moves the focused window to one. See [V4]
+  in `doc/spec/workspaces.md` and `doc/config.rb`.
 - **Memory in the bar** (trial). `contrib/polybar` shows the memory in use, as a
   percentage, beside the CPU.
 - **Units in status modules** (trial). `contrib/polybar/status <icon> --unit % …` shows

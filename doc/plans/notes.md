@@ -126,8 +126,14 @@ each section.
   test's own reaches sugoi after everything sent before, changes no managed state, and
   shows in the window's width once handled.
 - **Cycling by repeat** (user, 2026-10-31). Mod-n goes to n, then n+10, n+20, wrapping,
-  decided by the current workspace rather than a timeout. Empty workspaces are not
-  skipped, so a press always lands in the same place; polybar hides empty ones.
+  decided by the current workspace rather than a timeout.
+- **Cycling skips empty stacked workspaces** (user, 2026-11-03). Stepping through
+  empty ones cost presses in daily use, so a repeated Mod-n visits only n and the
+  stacked workspaces that hold a window, minimized ones included; n stays a dependable
+  home, even empty. A new stacked workspace is an explicit key (Mod-Ctrl-n, and
+  Mod-Ctrl-Shift-n to move a window there), written in the config from `windows` and
+  the exact `workspace 13`, not a core action: the core needed no new command, and
+  its tests no notification. This replaces 0.1's "empty workspaces are not skipped".
 - **3 banks of 10** (user, 2026-10-31). 30 workspaces; Mod-0 is workspace 10, so the
   cycle step is 10 and Mod-3 pressed twice reads as workspace 13.
 - **One monitor** (user, 2026-10-31). No multi-monitor support.

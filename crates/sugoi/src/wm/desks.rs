@@ -29,6 +29,11 @@ pub(super) fn desktop(reply: Result<GetPropertyReply, ReplyError>) -> Result<Opt
 }
 
 impl Wm {
+    /// [V4] Whether workspace `index` holds a window, minimized or not.
+    pub(super) fn used(&self, index: usize) -> bool {
+        self.clients.values().any(|c| c.workspace == index)
+    }
+
     /// [V2] Whether `window` is on the current workspace and not minimized.
     pub(super) fn visible(&self, window: Window) -> bool {
         self.clients.get(&window).is_some_and(|c| c.workspace == self.current && !c.minimized)
@@ -94,7 +99,7 @@ impl Wm {
         let target = match goto {
             Goto::Index(index) if index < COUNT => index,
             Goto::Index(_) => return Ok(()),
-            Goto::Number(n) => match workspace::target(self.current, n) {
+            Goto::Number(n) => match workspace::target(self.current, n, |w| self.used(w)) {
                 Some(target) => target,
                 None => return Ok(()),
             },
@@ -141,7 +146,7 @@ impl Wm {
     /// [V8] [H2]
     pub(super) fn move_window(&mut self, window: Window, n: u32) -> Result<(), Error> {
         let from = self.clients[&window].workspace;
-        match workspace::target(from, n) {
+        match workspace::target(from, n, |w| self.used(w)) {
             Some(target) => self.move_to_index(window, target),
             None => Ok(()),
         }
