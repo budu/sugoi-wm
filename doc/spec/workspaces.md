@@ -18,10 +18,13 @@ identifiers in brackets. Users number workspaces 1 to 30; EWMH numbers them 0 to
 
 ## Switching
 
-- **[V4] Cycling.** `workspace n` with n from 1 to 10 goes to the first workspace of
-  n's class (n, n+10, n+20) after the current one, in that order and wrapping: from
-  3, `workspace 3` goes to 13, then 23, then 3; from any workspace outside the class,
-  to n. Empty workspaces are not skipped. `workspace n` with n from 11 to 30 goes to n.
+- **[V4] Cycling.** `workspace n` with n from 1 to 10 goes, from a workspace of n's
+  class (n, n+10, n+20), to the next one in that order, wrapping, that holds a window
+  (minimized ones count); n itself always counts, even empty. From 3, with a window
+  on 23 and none on 13, `workspace 3` goes to 23, then back to 3; with none on either,
+  it stays. From any workspace outside the class, it goes to n. `workspace n` with n
+  from 11 to 30 goes to n, empty or not: a config makes a new stacked workspace by
+  going to an empty one ([`doc/config.rb`](../config.rb), Mod-Ctrl-n).
 - **[V5] Next and previous.** `workspace :next` and `workspace :previous` go to the
   workspace numbered one more or one less, wrapping from 30 to 1 and back.
 - **[V6] Back.** `workspace :back` goes to the workspace that was current before the
@@ -33,8 +36,9 @@ identifiers in brackets. Users number workspaces 1 to 30; EWMH numbers them 0 to
 ## Moving
 
 - **[V8] Move.** `move_to n` puts the focused window on the workspace `workspace n`
-  would go to from the window's own ([V4]), and the current workspace stays; the window
-  is hidden, and the focus goes on as when a window closes ([Z2]).
+  would go to from the window's own ([V4]), the window itself counting as one there,
+  and the current workspace stays; the window is hidden, and the focus goes on as when
+  a window closes ([Z2]).
 
 ## Across restarts
 
