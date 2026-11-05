@@ -62,6 +62,12 @@ each section.
 - **CRuby, embedded** (user, 2026-10-31). Full Ruby and gems through `magnus`, rather
   than mruby: the config is personal, so sandboxing matters less than the language and
   the bindings. The cost is a build tied to one libruby (0.1 plan, Risks).
+- **Stacking by raise order** (user, 2026-11-05). 0.1 kept floating and maximized
+  windows in a layer above tiled ones; in daily use a floating browser window covered
+  the master however it was clicked. Now they share one layer, in raise order, as in
+  awesome: a clicked tiled window covers a floating one. A window that starts floating
+  or maximized is raised, having no layer to rise into; on top (Mod-t) is the way to
+  keep one above.
 - **On top shows in the border** (user, 2026-11-05). A window left on top (Mod-t,
   kept across restarts through `_NET_WM_STATE`) kept every floating window under
   it, which looked like a stacking bug. The border tells it: amber, bright when

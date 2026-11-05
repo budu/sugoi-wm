@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Stacking by raise order** (trial). Floating and maximized windows no longer stay
+  above tiled ones: the last raised window is on top, as in awesome, so clicking a
+  tiled window brings it over a floating one. On top (Mod-t) still keeps a window above
+  the others. See [W8].
 - **Windows on top show it** (trial). A window on top (Mod-t, or an app's request) has
   an amber border, bright when focused, so it is clear why floating windows stay
   under it; `border on_top:, focused_on_top:` set the colors. See [F6].

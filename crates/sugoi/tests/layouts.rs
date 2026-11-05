@@ -153,17 +153,26 @@ fn y9_a_tiled_window_keeps_its_cell() {
 
 /// [W1] and [W8]
 #[test]
-fn w1_floating_leaves_the_layout_and_stacks_above() {
+fn w1_floating_leaves_the_layout_raised_and_a_raise_covers_it() {
     let session = tiling();
     let apps = map(&session, 2);
-    session.move_pointer(1000, 400);
+    // a is raised by a click; the pointer then focuses b without raising it ([F2]).
+    session.click(1000, 400);
+    eventually("a focused", || session.focus() == apps[0].window);
+    session.move_pointer(100, 400);
+    eventually("b focused", || session.focus() == apps[1].window);
+    settle();
+    assert!(session.above(apps[0].window, apps[1].window));
+    // Floating raises b.
     send(&session, Command::Toggle(State::Floating));
     eventually("a alone in the layout", || session.outer(apps[0].window) == FULL);
     assert_eq!(session.outer(apps[1].window), (0, 0, 640, 800));
-    send(&session, Command::Focus(sugoi::Direction::Previous));
-    eventually("a focused", || session.focus() == apps[0].window);
     settle();
     assert!(session.above(apps[1].window, apps[0].window));
+    // [W8] Raising the tiled one puts it above the floating one, as in awesome.
+    send(&session, Command::Focus(sugoi::Direction::Previous));
+    eventually("a focused", || session.focus() == apps[0].window);
+    eventually("a above b", || session.above(apps[0].window, apps[1].window));
     send(&session, Command::Focus(sugoi::Direction::Next));
     eventually("b focused", || session.focus() == apps[1].window);
     send(&session, Command::Toggle(State::Floating));
@@ -566,6 +575,30 @@ fn g1_g2_drags_show_their_cursors() {
         fake(MOTION_NOTIFY_EVENT, 0, 100, 100);
         eventually("the window's cursor again", || session.cursor_image() == normal);
     }
+}
+
+/// [W3] and [W8] A window maximized now is raised; on top stays above it.
+#[test]
+fn w3_a_maximized_window_is_raised_and_on_top_stays_above() {
+    let session = tiling();
+    let apps = map(&session, 3);
+    // c (apps[2]) on top; a is the last tiled raised before b maximizes.
+    send(&session, Command::Toggle(State::OnTop));
+    session.click(1000, 400);
+    eventually("a focused", || session.focus() == apps[0].window);
+    session.click(100, 200);
+    eventually("b focused", || session.focus() == apps[1].window);
+    session.click(1000, 400);
+    eventually("a focused again", || session.focus() == apps[0].window);
+    // The pointer focuses b without raising it ([F2]); maximizing raises it.
+    session.move_pointer(100, 200);
+    eventually("b focused", || session.focus() == apps[1].window);
+    settle();
+    assert!(session.above(apps[0].window, apps[1].window));
+    send(&session, Command::Toggle(State::Maximized));
+    eventually("b maximized", || session.outer(apps[1].window) == FULL);
+    assert!(session.above(apps[1].window, apps[0].window));
+    assert!(session.above(apps[2].window, apps[1].window), "on top above the maximized");
 }
 
 /// [Z1]

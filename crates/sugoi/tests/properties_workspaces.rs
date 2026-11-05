@@ -16,8 +16,7 @@
 //! spec names after a map ([F1]), focus next ([D5]), a switch ([V7]) or a restore
 //! ([W6]), and some shown window, or the root without one, after a close, minimize or
 //! move, where the pointer may decide ([Z2]); tiled cells covering the screen without
-//! overlap, or every window full-screen in max ([Y2], [Y5]); in X's own stacking, every
-//! shown floating window above every shown tiled one ([W8]).
+//! overlap, or every window full-screen in max ([Y2], [Y5]).
 //!
 //! Every operation goes through X (keys by XTEST, apps mapping and destroying), so the
 //! server orders them; a barrier then waits until sugoi has handled them all.
@@ -613,26 +612,6 @@ fn check(
     if shown.contains(&focus) {
         model.history.retain(|&w| w != focus);
         model.history.insert(0, focus);
-    }
-    // [W8] In X's own order, every shown floating window is above every shown tiled one.
-    let children = run.session.conn.query_tree(run.session.root).unwrap().reply().unwrap();
-    let position = |w: Window| children.children.iter().position(|&c| c == w);
-    let lowest_floating = model
-        .windows
-        .iter()
-        .filter(|w| model.shown(w) && w.floating)
-        .filter_map(|w| position(w.window).map(|p| (p, w.window)))
-        .min();
-    let highest_tiled = model
-        .windows
-        .iter()
-        .filter(|w| model.shown(w) && !w.floating)
-        .filter_map(|w| position(w.window).map(|p| (p, w.window)))
-        .max();
-    if let (Some((f, floating)), Some((t, tiled))) = (lowest_floating, highest_tiled)
-        && f < t
-    {
-        return Err(format!("floating {floating:#x} is under tiled {tiled:#x} in X"));
     }
     // The geometry of the shown windows the layout places ([U3]: floaters float).
     let tiled: Vec<Window> =

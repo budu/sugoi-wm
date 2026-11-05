@@ -50,18 +50,23 @@ impl Wm {
         self.order.iter().copied().filter(|&w| self.visible(w) && self.tiled(w)).collect()
     }
 
-    /// [W8] The stacking layer of `window`, from the bottom.
+    /// [W8] The stacking layer of `window`, from the bottom: tiled, floating and
+    /// maximized windows share the first, in the order they were raised.
     pub(super) fn layer(&self, window: Window) -> u8 {
         let c = &self.clients[&window];
         if c.fullscreen {
-            3
-        } else if c.on_top {
             2
-        } else if c.floating || c.maximized {
+        } else if c.on_top {
             1
         } else {
             0
         }
+    }
+
+    /// [W8] Puts `window` last in the raise order; the next restack shows it.
+    fn lift(&mut self, window: Window) {
+        self.stack.retain(|&w| w != window);
+        self.stack.push(window);
     }
 
     /// [Y1] Places every window where its layout and state say, then restacks.
@@ -236,6 +241,8 @@ impl Wm {
             (client.maximized, client.fullscreen) = (false, false);
             client.floating = true;
             client.rect = rect;
+            // [W1] It no longer has a layer of its own to rise into.
+            self.lift(window);
         }
     }
 
@@ -265,6 +272,10 @@ impl Wm {
             State::Floating => unreachable!("floating goes through float()"),
         };
         *flag = value.unwrap_or(!*flag);
+        // [W3] A window maximized now is raised; one on top or fullscreen has its layer.
+        if state == State::Maximized && client.maximized {
+            self.lift(window);
+        }
     }
 
     /// [W7]
