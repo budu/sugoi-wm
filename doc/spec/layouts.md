@@ -38,15 +38,16 @@ workspace; until then there is one of each.
 ## States
 
 - **[W1] Floating.** `toggle :floating` takes a window out of the layout, keeping its
-  geometry, or puts it back. Floating windows stack above tiled ones.
+  geometry, or puts it back. A window that starts floating is raised ([W8]).
 - **[W2] Placement.** A window that starts floating (in the float layout) without a
   position from its user or program (`WM_NORMAL_HINTS`) is centered on the screen;
   any floating window is moved to stay on screen.
-- **[W3] Maximized.** `toggle :maximized` makes a window fill the work area above the
-  tiled ones; toggling again restores its previous state and geometry.
+- **[W3] Maximized.** `toggle :maximized` makes a window fill the work area, raised
+  ([W8]); toggling again restores its previous state and geometry.
 - **[W4] Fullscreen.** `toggle :fullscreen` makes a window cover the whole screen,
   without a border, above every other managed window; toggling again restores it.
-- **[W5] On top.** `toggle :on_top` keeps a window above the floating ones.
+- **[W5] On top.** `toggle :on_top` keeps a window above every other, but a fullscreen
+  one.
 - **[W6] Minimized.** `minimize` unmaps the focused window and sets its `WM_STATE` to
   `IconicState`; the focus goes on as when a window closes ([F5]). `restore` maps the
   most recently minimized window again and focuses it, as a client mapping its own
@@ -55,9 +56,11 @@ workspace; until then there is one of each.
 - **[W7] Center.** `center` centers the focused window on the screen, and
   `center size: 0.7` also sizes it to 70 % of the screen; both make a tiled window
   float.
-- **[W8] Stacking.** From the bottom: tiled windows, floating and maximized ones, on-top
-  ones, then the fullscreen window. Raising a window ([F1], [F3], [D5]) puts it above
-  the others of its layer.
+- **[W8] Stacking.** From the bottom: every other window, tiled, floating or maximized,
+  in the order it was last raised; then the windows on top; then the fullscreen
+  window. Raising a window ([F1], [F3], [D5], [W1], [W3]) puts it above the others of
+  its layer, so a clicked tiled window covers a floating one, as in awesome; on top
+  keeps a window above them ([W5]).
 
 ## Mouse
 
