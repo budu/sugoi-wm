@@ -5,7 +5,8 @@
 //! a rule sends to workspace 2 or one a rule floats ([U2], [U3], [U7]), each maybe
 //! asking for workspace 1, 2, 3 or an invalid one, by property or message ([V10]), close
 //! one, `workspace` 1 to 3, which cycle on to 11 to 23, `move_to` 1 to 3, back, next,
-//! previous, minimize, restore, focus next, next layout, and a restart: a quit, then a
+//! previous, minimize, restore, focus next, next layout, a click on a shown window, a
+//! swap, centering the focused window (it floats), and a restart: a quit, then a
 //! start, after which every shown window is where it was, [V11]), on at most 6 windows, so
 //! cycling, emptied workspaces and minimized windows on hidden workspaces collide often.
 //!
@@ -15,7 +16,8 @@
 //! spec names after a map ([F1]), focus next ([D5]), a switch ([V7]) or a restore
 //! ([W6]), and some shown window, or the root without one, after a close, minimize or
 //! move, where the pointer may decide ([Z2]); tiled cells covering the screen without
-//! overlap, or every window full-screen in max ([Y2], [Y5]).
+//! overlap, or every window full-screen in max ([Y2], [Y5]); in X's own stacking, every
+//! shown floating window above every shown tiled one ([W8]).
 //!
 //! Every operation goes through X (keys by XTEST, apps mapping and destroying), so the
 //! server orders them; a barrier then waits until sugoi has handled them all.
@@ -25,7 +27,7 @@ mod common;
 use common::keycode::*;
 use common::*;
 use proptest::prelude::*;
-use sugoi::{Binding, Choice, Command, Effects, Goto, Matcher, Rule, Settings};
+use sugoi::{Binding, Choice, Command, Direction, Effects, Goto, Matcher, Rule, Settings};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::xtest::ConnectionExt as _;
@@ -38,6 +40,7 @@ const LEFT: u8 = 113;
 const RIGHT: u8 = 114;
 const N: u8 = 57;
 const SPACE: u8 = 65;
+const C: u8 = 54;
 
 /// What a mapped window is, for the rules in `settings` ([U2], [U3], [U7]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +78,12 @@ enum Op {
     Restore,
     FocusNext,
     LayoutNext,
+    /// [F3] A click in the middle of a shown window: it raises what is there.
+    Click(usize),
+    /// [D5] The focused window swaps with the next.
+    Swap,
+    /// [W7] The focused window floats, centered.
+    Center,
     /// [V11] Quit, then start again.
     Restart,
 }
@@ -98,6 +107,9 @@ fn op() -> impl Strategy<Value = Op> {
         2 => Just(Op::Restore),
         2 => Just(Op::FocusNext),
         1 => Just(Op::LayoutNext),
+        3 => (0usize..MAX_WINDOWS).prop_map(Op::Click),
+        1 => Just(Op::Swap),
+        2 => Just(Op::Center),
         1 => Just(Op::Restart),
     ]
 }
@@ -121,6 +133,8 @@ fn settings() -> Settings {
         ("Mod-n", Command::Minimize),
         ("Mod-Ctrl-n", Command::Restore),
         ("Mod-space", Command::Layout(Choice::Next)),
+        ("Mod-Shift-k", Command::Swap(Direction::Next)),
+        ("Mod-c", Command::Center(None)),
     ];
     let mut settings = Settings::default();
     for (chord, command) in extra {
@@ -502,6 +516,26 @@ fn history(ops: &[Op]) -> Result<(), TestCaseError> {
                 prop_assert_eq!(&before, &after, "a restart moved windows, step {}", step);
                 // [S2] The pointer's window, or the history's: some shown window.
             }
+            Op::Click(i) => {
+                let shown: Vec<Window> =
+                    model.windows.iter().filter(|w| model.shown(w)).map(|w| w.window).collect();
+                if shown.is_empty() {
+                    continue;
+                }
+                let (x, y, w, h) = run.session.outer(shown[i % shown.len()]);
+                let (cx, cy) = ((x + w as i32 / 2) as i16, (y + h as i32 / 2) as i16);
+                run.session.click(cx.clamp(0, 1279), cy.clamp(0, 799));
+                // Whatever is on top there takes the focus: some shown window.
+            }
+            Op::Swap => {
+                run.keys(&[SUPER, SHIFT, K]);
+            }
+            Op::Center => {
+                run.keys(&[SUPER, C]);
+                if let Some(w) = model.windows.iter_mut().find(|w| w.window == focused) {
+                    w.floating = true;
+                }
+            }
             Op::LayoutNext => {
                 run.keys(&[SUPER, SPACE]);
                 let layout = &mut model.layouts[model.current];
@@ -579,6 +613,26 @@ fn check(
     if shown.contains(&focus) {
         model.history.retain(|&w| w != focus);
         model.history.insert(0, focus);
+    }
+    // [W8] In X's own order, every shown floating window is above every shown tiled one.
+    let children = run.session.conn.query_tree(run.session.root).unwrap().reply().unwrap();
+    let position = |w: Window| children.children.iter().position(|&c| c == w);
+    let lowest_floating = model
+        .windows
+        .iter()
+        .filter(|w| model.shown(w) && w.floating)
+        .filter_map(|w| position(w.window).map(|p| (p, w.window)))
+        .min();
+    let highest_tiled = model
+        .windows
+        .iter()
+        .filter(|w| model.shown(w) && !w.floating)
+        .filter_map(|w| position(w.window).map(|p| (p, w.window)))
+        .max();
+    if let (Some((f, floating)), Some((t, tiled))) = (lowest_floating, highest_tiled)
+        && f < t
+    {
+        return Err(format!("floating {floating:#x} is under tiled {tiled:#x} in X"));
     }
     // The geometry of the shown windows the layout places ([U3]: floaters float).
     let tiled: Vec<Window> =
