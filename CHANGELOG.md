@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Windows on top show it** (trial). A window on top (Mod-t, or an app's request) has
+  an amber border, bright when focused, so it is clear why floating windows stay
+  under it; `border on_top:, focused_on_top:` set the colors. See [F6].
 - **Stacked workspaces in use** (trial). Repeating Mod-n cycles through n and the
   stacked workspaces that hold a window, skipping empty ones; Mod-Ctrl-n opens a new
   stacked workspace, and Mod-Ctrl-Shift-n moves the focused window to one. See [V4]

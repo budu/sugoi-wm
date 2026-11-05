@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use sugoi::{Command, Defaults, Error, Wm};
+use sugoi::{Command, Defaults, Error, State, Wm};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -342,6 +342,31 @@ fn f5_unmanaging_the_last_window_focuses_the_root() {
     app.conn.destroy_window(app.window).unwrap();
     app.conn.sync().unwrap();
     eventually("root focused", || session.focus() == POINTER_ROOT);
+}
+
+/// [F6] and [W5]
+#[test]
+fn f6_a_window_on_top_shows_it_focused_or_not() {
+    const ON_TOP: u32 = 0x7a5c1e;
+    const FOCUSED_ON_TOP: u32 = 0xe0af68;
+    let session = Session::new();
+    let a = session.app(AppSpec::at(0, 0, 200, 200));
+    let b = session.app(AppSpec::at(300, 0, 200, 200));
+    a.map();
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    assert!(session.send(Command::Toggle(State::OnTop)));
+    eventually("focused on top", || session.border_color(b.window) == FOCUSED_ON_TOP);
+    session.move_pointer(50, 50);
+    eventually("a focused", || session.focus() == a.window);
+    eventually("on top, unfocused", || session.border_color(b.window) == ON_TOP);
+    assert_eq!(session.border_color(a.window), FOCUSED);
+    session.move_pointer(350, 50);
+    eventually("b focused again", || session.focus() == b.window);
+    assert!(session.send(Command::Toggle(State::OnTop)));
+    eventually("off top", || session.border_color(b.window) == FOCUSED);
+    session.move_pointer(50, 50);
+    eventually("plain again", || session.border_color(b.window) == NORMAL);
 }
 
 /// [F6]

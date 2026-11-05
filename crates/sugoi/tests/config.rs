@@ -47,6 +47,24 @@ fn l1_d1_the_config_file_sets_the_border() {
     });
 }
 
+/// [D1] and [F6]
+#[test]
+fn d1_the_config_sets_the_on_top_colors() {
+    let session = Session::with_config(
+        "border on_top: \"#00ffff\", focused_on_top: \"#ffff00\"\n\
+         key(\"Mod-x\") { toggle :on_top }\n",
+    );
+    let a = session.app(AppSpec::at(0, 0, 200, 200));
+    a.map();
+    eventually("a focused", || session.focus() == a.window);
+    session.keys(&[SUPER, X]);
+    eventually("focused on top", || session.border_color(a.window) == 0xffff00);
+    let b = session.app(AppSpec::at(300, 0, 200, 200));
+    b.map();
+    eventually("b focused", || session.focus() == b.window);
+    eventually("a on top, unfocused", || session.border_color(a.window) == 0x00ffff);
+}
+
 /// [L2]
 #[test]
 fn l2_the_config_is_plain_ruby() {

@@ -62,6 +62,10 @@ each section.
 - **CRuby, embedded** (user, 2026-10-31). Full Ruby and gems through `magnus`, rather
   than mruby: the config is personal, so sandboxing matters less than the language and
   the bindings. The cost is a build tied to one libruby (0.1 plan, Risks).
+- **On top shows in the border** (user, 2026-11-05). A window left on top (Mod-t,
+  kept across restarts through `_NET_WM_STATE`) kept every floating window under
+  it, which looked like a stacking bug. The border tells it: amber, bright when
+  focused; two colors, since an X border has one and the focus must still show.
 - **One meaning per chord** (user, 2026-10-31). awesome's overlaps were mistakes:
   Mod-Shift-q kills the focused window, Mod-Shift-e quits, Mod-Ctrl-Return opens
   a session launcher. Bindings never depend on whether a window has focus.

@@ -155,10 +155,11 @@ module Sugoi
     end
 
     # [D1]
-    def border(width: nil, focused: nil, normal: nil)
+    def border(width: nil, focused: nil, normal: nil, on_top: nil, focused_on_top: nil)
       @border[:width] = Integer(width) unless width.nil?
-      @border[:focused] = Sugoi.color(focused) unless focused.nil?
-      @border[:normal] = Sugoi.color(normal) unless normal.nil?
+      { focused:, normal:, on_top:, focused_on_top: }.each do |name, color|
+        @border[name] = Sugoi.color(color) unless color.nil?
+      end
     end
 
     # [D2]
@@ -215,10 +216,10 @@ module Sugoi
       @hooks << [Sugoi.one_of(event, %w[manage focus unmanage workspace]), register(event, block)]
     end
 
-    # What sugoi reads: [width, focused, normal, modkey, keys, buttons, root buttons,
-    # layouts, master side, master width, rules, hooks].
+    # What sugoi reads: [[width, focused, normal, on top, focused on top], modkey, keys,
+    # buttons, root buttons, layouts, master side, master width, rules, hooks].
     def export
-      [@border[:width], @border[:focused], @border[:normal], @modkey,
+      [@border.values_at(:width, :focused, :normal, :on_top, :focused_on_top), @modkey,
        @keys.to_a, @buttons.to_a, @root_buttons.to_a,
        @layouts, @master[:side], @master[:width], @rules, @hooks]
     end

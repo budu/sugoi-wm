@@ -146,6 +146,8 @@ struct Client {
     started: Option<u64>,
     /// The border width before sugoi managed the window, restored on withdrawal.
     border_width: u16,
+    /// [F6] The border color last painted.
+    border_color: Option<u32>,
     /// The outer rectangle the window has when it floats.
     rect: Rect,
     /// The outer rectangle and border sugoi last configured.
@@ -640,11 +642,12 @@ impl Wm {
         for &window in self.clients.keys() {
             self.conn.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
             self.grab_buttons(window)?;
-            if loaded {
-                let focused = self.focused == Some(window);
-                let color = if focused { self.border.focused } else { self.border.normal };
-                let color = ChangeWindowAttributesAux::new().border_pixel(color);
-                self.conn.change_window_attributes(window, &color)?;
+        }
+        // [L5] The new config's colors.
+        if loaded {
+            let windows: Vec<Window> = self.clients.keys().copied().collect();
+            for window in windows {
+                self.paint_border(window, self.focused == Some(window))?;
             }
         }
         Ok(())
@@ -1004,6 +1007,7 @@ impl Wm {
             started: info.pid.and_then(apps::start_time),
             info,
             border_width: geometry.border_width,
+            border_color: Some(self.border.normal),
             rect: if map { self.initial_rect(rect, positioned) } else { rect },
             placed: None,
             floating: false,
@@ -1165,8 +1169,7 @@ impl Wm {
         if hints.take_focus {
             self.send_protocol(window, self.atoms.WM_TAKE_FOCUS)?;
         }
-        let focused = ChangeWindowAttributesAux::new().border_pixel(self.border.focused);
-        self.conn.change_window_attributes(window, &focused)?;
+        self.paint_border(window, true)?;
         self.history.retain(|&w| w != window);
         self.history.insert(0, window);
         let changed = self.focused != Some(window);

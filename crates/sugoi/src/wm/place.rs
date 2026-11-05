@@ -99,6 +99,11 @@ impl Wm {
             };
             moved |= self.place(window, rect, border)?;
         }
+        // [F6] A window put on top, or taken off, shows it.
+        let windows: Vec<Window> = self.clients.keys().copied().collect();
+        for window in windows {
+            self.paint_border(window, self.focused == Some(window))?;
+        }
         moved |= self.restack()?;
         if moved {
             self.ignore_crossings()?;
@@ -554,10 +559,21 @@ impl Wm {
         self.visible(window) && self.clients[&window].hints.focusable()
     }
 
-    /// Gives `window` the normal border color.
-    pub(super) fn unfocus(&self, window: Window) -> Result<(), Error> {
-        let normal = ChangeWindowAttributesAux::new().border_pixel(self.border.normal);
-        self.conn.change_window_attributes(window, &normal)?;
+    /// Gives `window` the border color of an unfocused window.
+    pub(super) fn unfocus(&mut self, window: Window) -> Result<(), Error> {
+        self.paint_border(window, false)
+    }
+
+    /// [F6] Paints `window`'s border for its focus and whether it is on top, when that
+    /// color is not the one it has.
+    pub(super) fn paint_border(&mut self, window: Window, focused: bool) -> Result<(), Error> {
+        let client = self.clients.get_mut(&window).expect("painted windows are managed");
+        let color = self.border.color(focused, client.on_top);
+        if client.border_color != Some(color) {
+            client.border_color = Some(color);
+            let aux = ChangeWindowAttributesAux::new().border_pixel(color);
+            self.conn.change_window_attributes(window, &aux)?;
+        }
         Ok(())
     }
 }

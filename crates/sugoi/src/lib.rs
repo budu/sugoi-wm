@@ -23,12 +23,33 @@ pub struct Border {
     pub width: u16,
     pub focused: u32,
     pub normal: u32,
+    /// For a window on top ([W5]), unfocused and focused.
+    pub on_top: u32,
+    pub focused_on_top: u32,
+}
+
+impl Border {
+    /// [F6] The color for a window, focused or not, on top or not.
+    pub fn color(&self, focused: bool, on_top: bool) -> u32 {
+        match (focused, on_top) {
+            (true, true) => self.focused_on_top,
+            (true, false) => self.focused,
+            (false, true) => self.on_top,
+            (false, false) => self.normal,
+        }
+    }
 }
 
 impl Default for Border {
-    /// The awesome config's values.
+    /// The awesome config's values, and amber for windows on top.
     fn default() -> Self {
-        Border { width: 3, focused: 0xaa007b, normal: 0x000000 }
+        Border {
+            width: 3,
+            focused: 0xaa007b,
+            normal: 0x000000,
+            on_top: 0x7a5c1e,
+            focused_on_top: 0xe0af68,
+        }
     }
 }
 

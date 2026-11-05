@@ -4,7 +4,9 @@
 
 require "shellwords"
 
-border width: 3, focused: "#aa007b", normal: "#000000"
+# Windows on top (Mod-t) get amber borders, so they are seen ([F6]).
+border width: 3, focused: "#aa007b", normal: "#000000",
+       on_top: "#7a5c1e", focused_on_top: "#e0af68"
 modkey "Mod4"
 
 # Tile with the master on the right, as awesome's tile.left

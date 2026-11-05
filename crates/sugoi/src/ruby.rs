@@ -20,9 +20,7 @@ type Chords = Vec<(String, usize)>;
 /// What `Sugoi.load` exports: border width and colors, modkey, keys, buttons, root
 /// buttons, layouts, master side and width.
 type Exported = (
-    Option<u16>,
-    Option<u32>,
-    Option<u32>,
+    (Option<u16>, Option<u32>, Option<u32>, Option<u32>, Option<u32>),
     String,
     Chords,
     Chords,
@@ -112,9 +110,7 @@ impl Script for RubyScript {
             return Err(message.to_string().map_err(|e| e.to_string())?);
         }
         let (
-            width,
-            focused,
-            normal,
+            (width, focused, normal, on_top, focused_on_top),
             modkey,
             keys,
             buttons,
@@ -136,6 +132,8 @@ impl Script for RubyScript {
                 width: width.unwrap_or(defaults.width),
                 focused: focused.unwrap_or(defaults.focused),
                 normal: normal.unwrap_or(defaults.normal),
+                on_top: on_top.unwrap_or(defaults.on_top),
+                focused_on_top: focused_on_top.unwrap_or(defaults.focused_on_top),
             },
             modkey,
             keys: bind(keys),
