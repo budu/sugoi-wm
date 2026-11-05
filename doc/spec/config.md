@@ -28,8 +28,9 @@ hooks (M5), spawn limits (M6).
 
 ## DSL
 
-- **[D1] Border.** `border width: 3, focused: "#aa007b", normal: "#000000"`; each
-  keyword is optional and keeps its default.
+- **[D1] Border.** `border width: 3, focused: "#aa007b", normal: "#000000"`, and
+  `on_top:` and `focused_on_top:` for windows on top ([F6]); each keyword is optional
+  and keeps its default.
 - **[D2] Modkey.** `modkey "Mod4"` names the modifier that `Mod` stands for in chords;
   the default is `Mod4`.
 - **[D3] Keys.** `key "Mod-Shift-j" do ... end` binds a chord to a block. A chord is

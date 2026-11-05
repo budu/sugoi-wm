@@ -71,8 +71,10 @@ border is the client window's own X border, and windows stay usable if sugoi exi
   pointer wins over the history, as in awesome.
 - **[F7] Malformed hints.** A `WM_HINTS` property sugoi cannot parse counts as absent.
 - **[F6] Borders.** The focused window's border has the focused color, every other
-  managed window's the normal color. Defaults, from the awesome config: width 3 px,
-  focused `#aa007b`, normal `#000000`.
+  managed window's the normal color. A window on top ([W5]) shows it: focused, it has
+  the focused-on-top color, else the on-top color. Defaults, from the awesome config:
+  width 3 px, focused `#aa007b`, normal `#000000`; then focused on top `#e0af68`, on
+  top `#7a5c1e`.
 
 ## Closing
 
